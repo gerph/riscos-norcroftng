@@ -251,6 +251,66 @@ This is worth fixing before calling C++ support usable for anything beyond
 templates/toy examples, and is a strictly more urgent problem than the
 library gap above.
 
+#### Root cause, confirmed: a call-site/vtable-content mismatch, not a
+#### constructor problem
+
+Investigated directly rather than guessed at. Disassembling the crashing
+case (`-S`) and running it under `riscos-run --debug traceblock` gives an
+exact, unambiguous answer:
+
+```
+__VTABLE__4Base
+        b               val__4BaseFv        ; the vtable "slot" is a branch instruction
+
+...call site, inside main...
+        ldr     r1, [sp]        ; r1 = the vtable pointer (address of __VTABLE__4Base)
+        mov     lr, pc
+        ldr     pc, [r1]        ; pc = *(word at r1) -- treats r1 as a data pointer
+```
+
+The crash trace confirms it precisely: `pc` ends up as `&ea00003a` —
+which is *exactly* the raw 32-bit encoding of the `b val__4BaseFv`
+instruction sitting in the vtable slot (`0xEA` = unconditional branch,
+`0x00003a` = the branch's own word offset), not a real address. `LDR pc,
+[r1]` *dereferences* the vtable slot, expecting to find a data word there
+containing the target function's address — but what's actually stored
+there is a branch *instruction*, meant to be jumped to directly (`MOV pc,
+r1`), not read as data. Two code-generation paths disagree about which
+vtable convention this backend uses, and the call site loses.
+
+This is **not** a constructor-initialisation problem — there's no global
+state, no static-initialiser table, and no heap involved anywhere in the
+minimal repro (`Base b; b.val();`, one class, one method, called directly
+on a stack object). The mismatch is entirely between how the vtable's
+*content* gets generated and how a virtual call *site* reads it.
+
+The relevant mechanism exists and looks correctly written where it's
+easy to find: `ncc/arm/target.h` defines
+`target_has_data_vtables` as `(!pcrel_vtables)`, and
+`ncc/mip/flowgraf.c` (~line 3106) branches on that flag when building each
+vtable slot — data-word emission (`J_WORD_ADCON`/`J_WORD_LABEL`) if true,
+a tail-call branch if false. `pcrel_vtables` itself
+(`ncc/mip/globals.h`) reads a pragma slot (`pp_pragmavec['u'-'a'] > 0`,
+settable via `-zpu<n>`), which defaults to off (data vtables, matching
+what the call site expects) per its initialisation in `ncc/cfe/pp.c`.
+
+**What I couldn't pin down**: passing `-zpu0` or `-zpu1` explicitly made
+no difference at all to the emitted vtable — always the branch form,
+never a data word, for this simple single-method case. I traced the
+plumbing from the CLI option (`ncc/mip/driver.c`'s `-z` handling) through
+to where it's consumed (`ncc/mip/compiler.c`'s `DoPredefine`, called
+unconditionally via `toolenv_enumerate` during setup) and it all looks
+correctly wired for both C and C++ — so either this specific "simple,
+no this-pointer-adjustment" vtable slot doesn't go through the
+`flowgraf.c` code above at all (most likely — that code's `ptr_adjust_zero`
+branching suggests it may be reached only for the more complex
+multiple-inheritance/this-adjusting-thunk case), or there's a second,
+related bug in how the pragma reaches this decision. I didn't find the
+actual code path that generates *this* simple case's vtable content
+before running out of productive leads by tracing outward from the
+disassembly — this is the next concrete step for whoever picks this up,
+and worth your eyes specifically given how well you know this code.
+
 ## Open Questions
 
 - Should the eventual `/riscos-resources` integration (deferred per Scope)
