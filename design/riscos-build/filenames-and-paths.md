@@ -86,43 +86,52 @@ this design's scope, not something to silently assume is fine.
 
 ## Open Questions
 
-- **Colon-path/system-variable expansion for `#include` search is *not*
-  confirmed working**, and needs more tracing before it can be called
-  done. What's established:
-  - `ncc/mip/driver.c`'s `pathfromenv()` helper (reads a named environment
-    variable, and — when `Compiling_On_Unix` — rewrites `:` to `,` inside
-    its value) is verbatim-identical to the same function in `cc`'s own
-    `driver.c`. This part is inherited unchanged, not reimplemented.
-  - This build environment already exposes RISC-OS-style path variables
-    as plain environment variables — confirmed: `C` is set to
-    `/riscos-built/Export/Lib/CLib/,/riscos-built/Export/Lib/,...`,
-    already comma-separated (RISC OS list style), not colon-separated.
-    Whether `pathfromenv`'s colon-to-comma rewrite does anything harmful
-    or useful against a value that's already comma-separated wasn't
-    checked (it's likely a harmless no-op, since there's no `:` character
-    to replace, but "likely" isn't "confirmed").
-  - **What's not established**: whether/where the general `-I` mechanism
-    actually invokes `pathfromenv`-style expansion for a colon-suffixed
-    argument. Tracing `driver.c`'s `-I` handling shows `AddInclude()`
-    simply stores the literal argument string — no colon detection there.
-    A live test (`-IMYPATHVAR:` with `MYPATHVAR` set to a real directory
-    containing the header) **failed** — `#include <myinc.h>` wasn't found.
-    This could mean the mechanism lives elsewhere (not yet located — likely
-    in `ncc/cfe/pp.c`'s actual file-open logic, where the
-    "wouldn't open" error text originates) and needs a different
-    invocation syntax than what was tried, or that this specific
-    capability genuinely doesn't work yet in this fork. **Needs
-    resolving before this requirement can be marked done** — this is the
-    one piece of the user's stated requirement that isn't yet backed by
-    either a working example or a precisely root-caused gap (unlike the
-    `fname` duality above, which has both).
-  - Note this is scoped to the *compiler's* include search specifically.
-    The colon-path resolution already proven working in this design
-    (`C:o.stubsG`, see [linking-and-c-library.md](linking-and-c-library.md))
-    is `riscos-link` resolving a *linker* argument, a separate tool with
-    its own (already-working, unexamined-here) path logic — it says
-    nothing about whether the compiler's own `#include` search does the
-    same thing correctly.
+- **Colon-path/system-variable expansion for `#include` search: tested
+  directly against the environment's real, production `riscos-cc`
+  (v5.18) — not just Norcroft NG — and it did not work, in a cleanly
+  isolated test.** The user confirmed the intended syntax
+  (`-IC:` to search every directory listed in variable `C`; `-I<Lib$Dir>.
+  GetOptDir` to substitute `Lib$Dir`'s value, matched host-side by a
+  `LIB_DIR` environment variable, then append `.GetOptDir`) is correct.
+  Isolated the test carefully to rule out confounds:
+  - Confirmed `LIB_DIR` and `C` are both real, already-set environment
+    variables in this container (`LIB_DIR=/riscos-built/Export/Lib`,
+    `C=/riscos-built/Export/Lib/CLib/,/riscos-built/Export/Lib/,...`,
+    already RISC-OS-style comma-separated).
+  - Confirmed a plain literal `-I/absolute/path` works correctly against
+    `riscos-cc` (isolates that basic `-I` parsing and file-open both work
+    at all).
+  - With that same working setup, replacing the literal path with either
+    `-IC:` or `-I"<Lib\$Dir>.GetOptDir"` (both with and without a space
+    after `-I`) **consistently failed** to find a header
+    (`marker.h`/`h/marker`, both forms present) that the literal-path form
+    found without issue.
+  - `riscos-cc -help` documents only the plain form
+    (`-I<directory>   Include <directory> on the #include search path`) —
+    silent on both variable forms, which is consistent with either "not
+    implemented" or "real but undocumented," so the help text doesn't
+    settle it either way.
+  - Source-level: neither `cc`'s own `compiler.c`/`pp.c` nor Norcroft NG's
+    equivalents call CLX's `pathmacro_resolve` (the function that actually
+    implements `<Var>` bracket substitution — read its full source at
+    `Sources/Lib/CLX/c/pathmacro`) anywhere. `cc` opens include files with
+    plain `fopen()`. This is consistent with the empirical failure: the
+    code path that would need to exist to make either syntax work doesn't
+    appear to be wired into the compiler's own file-open logic at all, in
+    either codebase.
+  - **This raises a real fork needing your call, not mine to guess**:
+    is this expansion actually meant to happen a level up — in `riscos-amu`
+    (the Makefile tool), which would expand `<Lib$Dir>`/`Foo:` in Makefile
+    text before ever constructing the command line the compiler sees — so
+    that the compiler binary itself never needs this logic, and Norcroft
+    NG already gets it "for free" the moment it's driven through
+    `riscos-amu` rather than invoked directly (matching how I tested it,
+    bypassing AMU entirely)? Or is direct command-line expansion inside
+    the compiler genuinely expected to work (in which case it doesn't work
+    even in the existing production `riscos-cc` today, which would be
+    worth knowing regardless of this project). I don't have a way to tell
+    these apart from here without either reading `riscos-amu`'s own source
+    or you confirming which layer is supposed to own this.
 
 ## Proposals
 
