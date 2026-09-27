@@ -207,9 +207,13 @@ so that phase starts from a concrete target.
   to work, or is a plain `bin/ncc-riscos` → `riscos-ncc` copy at a known
   path enough for the harness to pick up?
 
-### `riscos-n++` is a language-level C++ compiler only, for now — and
-### **virtual functions do not work at runtime yet**, which is a bigger
-### caveat than "no standard library"
+### `riscos-n++` is a language-level C++ compiler only, for now — virtual
+### functions previously crashed at runtime; this is now fixed
+
+**Fixed** (see the root-cause and fix write-up below) — kept here as the
+record of what was wrong and why, since the two remaining C++ crashes
+below are not fixed and the general "language-level compiler only, no
+standard library" scoping below still applies.
 
 Confirmed with the user: there is no C++ standard library (no libstdc++
 equivalent) for RISC OS in this environment yet, and building one is not
@@ -322,18 +326,34 @@ entirely** because of the `J_ORG` guard, falling back to generic lowering
 that was never written with `target_has_data_vtables` in mind (it
 predates that distinction, or was never updated for it).
 
-**The fix, precisely scoped**: either make the `J_ORG` fast-path at
-`flowgraf.c` (immediately preceding the `target_has_data_vtables` check
-around line 3106) also respect `target_has_data_vtables` before falling
-through to generic lowering, or work out why `J_ORG` is the first icode
-for this trivial one-entry, zero-adjustment vtable in the first place
-(nothing in `cppfe/xvargen.c` — where vtable content is assembled —
-inserts `J_ORG` directly, so it's arriving from somewhere else in the
-pipeline that wasn't traced further). Either fix should be small and
-localised to `flowgraf.c`'s handling of this one case; I stopped here
-rather than attempt the fix itself, since this was scoped as
-investigation, not implementation — but this is now precise enough to
-fix directly, not just to keep investigating.
+**Traced one level further, to why `J_ORG` appears at all, and fixed.**
+`cg.c`'s `s_thunkentry` case (`case s_thunkentry:`) only emits `J_ORG`
+padding per vtable entry `if (TARGET_VTAB_ELTSIZE > 4)` — that macro
+defaults to 12 (`mip/defaults.h`) unless a target's `options.h`
+overrides it. `cpparm/options.h`, `cppthumb/options.h`, and
+`cppint/options.h` all correctly define it as 4 ("for indirect VTABLEs
+optimised for single inheritance"); `ccacorn/options.h` — the options
+header `TARGET=riscos` actually uses, for both `ncc` and `n++` — simply
+never defined it, so it silently fell back to 12, unconditionally
+triggering the `J_ORG` emission that then bypassed the whole
+`target_has_data_vtables` decision in `flowgraf.c`.
+
+**Fix applied**: added the same `#define TARGET_VTAB_ELTSIZE 4` to
+`ncc/ccacorn/options.h` that the other C++ targets already have. No
+change needed to `flowgraf.c`, `cg.c`, or the call site — once the
+element size matches what "data vtables" actually need, the existing,
+correctly-written `target_has_data_vtables` logic runs as designed.
+
+Verified: the minimal repro now emits `DCD val__4BaseFv` (a data word)
+instead of `b val__4BaseFv`, and real polymorphism now works end-to-end
+under `riscos-run` — virtual dispatch through a pointer, through `new`,
+and through a virtual destructor with a user-supplied `operator delete`,
+all producing correct output where they previously crashed. Full
+existing test suite unaffected (no regressions). A regression test,
+`tests/cpp/virtual/vtable_single_method_is_data.cpp`, asserts the vtable
+slot is a data word; confirmed it fails with the bug reintroduced before
+restoring the fix — see
+[testing-and-validation.md](testing-and-validation.md).
 
 ## Open Questions
 

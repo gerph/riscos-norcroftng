@@ -15,7 +15,7 @@ modifications), using the repository's own `runtests.py`:
 | `tests/c`     | `ncc-riscos`   | 4/4 pass                         |
 | `tests/fpa`   | `ncc-riscos`   | 30/30 pass                       |
 | `tests/vfp`   | `ncc-riscos`   | 29/30 pass (1 known failure — see [floating-point.md](floating-point.md)) |
-| `tests/cpp`   | `n++-riscos`   | 11/11 pass                       |
+| `tests/cpp`   | `n++-riscos`   | 12/12 pass (11 original + 1 new regression test, see below) |
 
 This is a small suite overall (the repository is still early in rebuilding
 its regression coverage — see `ncc/tests/` for a separate, older set of
@@ -25,15 +25,17 @@ this project ends up with). The point of running it here wasn't to declare
 the compiler "done" — it was to confirm the cross-build is real and
 functional before writing the rest of this design around it.
 
-**The 11/11 `tests/cpp` pass rate is real but narrow, and shouldn't be
-read as "C++ works."** None of those 11 tests use a virtual function,
-`new`/`delete`, or exceptions — and direct hand-testing beyond the suite
-found that virtual functions crash at runtime unconditionally (a compiler
-bug, see [build-and-integration.md](build-and-integration.md)), that
-`operator new[]`/`operator delete[]` crash the *compiler*, and that `throw`
-segfaults the compiler (see
-[linking-and-c-library.md](linking-and-c-library.md) for all three, found
-by testing directly rather than assumed). The suite currently measures
+**The original 11/11 `tests/cpp` pass rate was real but narrow, and
+shouldn't have been read as "C++ works."** None of those 11 tests used a
+virtual function, `new`/`delete`, or exceptions — direct hand-testing
+beyond the suite is what actually found that virtual functions crashed at
+runtime unconditionally (now fixed, see
+[build-and-integration.md](build-and-integration.md)), and that
+`operator new[]`/`operator delete[]` and `throw` both crash the *compiler*
+itself (still open, see
+[linking-and-c-library.md](linking-and-c-library.md)). A 12th test
+(the virtual-function regression test) has since been added, but the
+suite still doesn't cover `new[]`/`delete[]` or exceptions — it measures
 "the C++ front end parses and generates code for the constructs it has
 tests for," which is a real and useful signal, but a materially smaller
 claim than "C++ works" — worth keeping in mind before quoting the pass
@@ -86,15 +88,19 @@ today.
   — so it's now a candidate for a permanent regression test (turning a
   one-off hand check into something `runtests.py` runs every time) rather
   than an open risk.
-- Add regression tests for the three concrete C++ bugs found while
-  testing this design (virtual-function runtime crash, `operator new[]`/
-  `operator delete[]` compiler-fatal, `throw` compiler segfault — see
+- Three concrete C++ bugs were found while testing this design
+  (virtual-function runtime crash, `operator new[]`/`operator delete[]`
+  compiler-fatal, `throw` compiler segfault — see
   [build-and-integration.md](build-and-integration.md) and
-  [linking-and-c-library.md](linking-and-c-library.md)) *once each is
-  fixed*, so none of the three regress silently. Filing these as tests
-  before the fix exists isn't useful (a crash isn't a `// CHECK:`-able
-  assembly assertion) — they belong in whatever bug tracking this project
-  uses, with a note to add the regression test alongside the fix.
+  [linking-and-c-library.md](linking-and-c-library.md)). The first is now
+  **fixed**, with a regression test added:
+  `tests/cpp/virtual/vtable_single_method_is_data.cpp` asserts the vtable
+  slot for a single virtual method is a `DCD` data word, not a branch
+  instruction — confirmed to fail (`CHECK not found: 'DCD'`) with the fix
+  reverted, and pass with it restored. The other two remain open; add
+  their regression tests alongside whichever fix lands for each, the same
+  way — filing a test before the fix exists isn't useful (a compiler
+  crash isn't a `// CHECK:`-able assembly assertion).
 - Any CI for this project (not designed here — no CI currently exists for
   Norcroft NG) should build with the exact commands in
   [build-and-integration.md](build-and-integration.md)

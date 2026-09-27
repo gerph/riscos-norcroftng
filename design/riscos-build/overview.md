@@ -83,26 +83,37 @@ the evidence and reasoning. This freed up the effort that would have gone
 into an ELF backend, which is why floating-point ABI and module support get
 deeper treatment below instead.
 
-## A second finding, less welcome: virtual functions crash at runtime
+## A second finding, less welcome: virtual functions crashed at runtime
+## (now fixed)
 
-Hand-testing beyond the existing `tests/cpp` suite (which has no coverage
+Hand-testing beyond the existing `tests/cpp` suite (which had no coverage
 of virtual functions, `new`/`delete`, or exceptions) found that **any
-class with a virtual function crashes immediately at runtime**, in the
+class with a virtual function crashed immediately at runtime**, in the
 smallest possible reproduction (one virtual method, no inheritance, called
-directly on a concrete stack object — not even through a pointer). This
-compiles and links cleanly; it's a runtime crash right on entry to
-`_main`. Two further, separate C++ front-end crashes were found alongside
-it: overloading `operator new[]`/`operator delete[]` aborts the compiler
-with an internal consistency-check failure, and compiling `throw`
-segfaults the compiler outright. None of these are library gaps — they're
-compiler bugs, found by testing directly rather than assumed from the
-existing test suite's pass rate. See
-[build-and-integration.md](build-and-integration.md) and
+directly on a concrete stack object — not even through a pointer). Root
+cause: `ncc/ccacorn/options.h` (used for `TARGET=riscos`) was missing a
+`TARGET_VTAB_ELTSIZE` define that the other C++-capable targets all have,
+which caused an unrelated code-size-padding directive to unconditionally
+bypass the compiler's otherwise-correct vtable-content logic, always
+emitting a branch instruction where the call site expected a data
+pointer. **Fixed** with a one-line define, verified against several
+polymorphism cases (through a pointer, through `new`, through a virtual
+destructor), with a regression test added
+(`tests/cpp/virtual/vtable_single_method_is_data.cpp`) and no regressions
+in the rest of the suite. Full write-up in
+[build-and-integration.md](build-and-integration.md).
+
+Two further, separate C++ front-end crashes remain open, found alongside
+it while testing: overloading `operator new[]`/`operator delete[]` aborts
+the compiler with an internal consistency-check failure, and compiling
+`throw` segfaults the compiler outright. Neither is a library gap —
+they're compiler bugs, found by testing directly rather than assumed from
+the existing test suite's pass rate. See
 [linking-and-c-library.md](linking-and-c-library.md) for the exact
-reproductions. This changes `riscos-n++`'s honest current scope from
-"C++ minus a standard library" to "compiles non-polymorphic C++" — a
-materially smaller claim, and one worth fixing before C++ support is
-presented as usable for anything beyond templates and toy examples.
+reproductions. With the virtual-function crash fixed, `riscos-n++`'s
+honest current scope is "compiles polymorphic C++, minus a standard
+library, minus array-new/delete and exceptions" — better than where this
+design started, with two known, bounded gaps left rather than three.
 
 ## Areas
 
