@@ -100,22 +100,28 @@ as a confirmed fact rather than a guess, and left out of scope (see
   design; it only becomes urgent once real multi-object-file RISC OS
   projects start choosing between the two ABIs.
 
+## Decisions (continued)
+
+### Default to FPA/FPE3
+
+Confirmed by the user: default to FPA "for maximum compatibility" when a
+project doesn't specify an ABI explicitly. This also matches this
+environment's own existing documented convention
+(`riscos-help build-and-link`, which uses `-apcs 3/32/fpe3` in its 32-bit
+example) and the fact that FPA has zero known codegen test failures today
+versus VFP's one (see Decisions above). Both ABIs remain fully available —
+this only sets what happens when a project's makefile doesn't ask for
+either explicitly (via `-apcs .../fpe3` or `-apcs .../vfp`, exactly as
+today).
+
 ## Proposals
 
-- **Support both FPA and VFP as explicit, user-selected options** (exactly
-  as today, via `-apcs .../fpe3` or `-apcs .../vfp`), rather than picking
-  one and dropping the other. Both are real and largely working; dropping
-  either would be throwing away working code generation for no proven
-  benefit.
-- **Default to FPA/FPE3** when a project's makefile doesn't specify an ABI,
-  matching this environment's own existing documented convention
-  (`riscos-help build-and-link`) and the fact that FPA has zero known
-  codegen test failures today versus VFP's one. Projects wanting VFP
-  (e.g. for hardware performance) opt in explicitly, same as they already
-  have to today for any RISC OS compiler in this environment. Revisit this
-  once the varargs question above is actually investigated — if VFP turns
-  out to be the more broadly-tested/robust path in practice, the default
-  should follow the evidence, not this document's initial guess.
+- **Support both FPA and VFP as explicit, user-selected options**, rather
+  than picking one and dropping the other. Both are real and largely
+  working; dropping either would be throwing away working code generation
+  for no proven benefit. (This part remains a Proposal in the sense that
+  it hasn't been separately asked; it's implied by "default to FPA" above
+  meaning VFP stays available, not removed.)
 - **Soft-float stays fully out of scope** until someone has an actual
   no-FPU-hardware target that needs it — building a software floating
   point emulation library is a substantial undertaking with essentially no

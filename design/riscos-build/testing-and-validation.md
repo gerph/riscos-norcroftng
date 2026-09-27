@@ -67,11 +67,13 @@ today.
   work, extend the test suite with the specific cases flagged elsewhere in
   this design as unverified: varargs functions mixing float/double/int
   arguments under both ABIs
-  ([floating-point.md](floating-point.md)), and C++ runtime-support-
+  ([floating-point.md](floating-point.md)), C++ runtime-support-
   dependent features (`new`/`delete`, exceptions, RTTI) against
-  `C:o.stubsG` ([linking-and-c-library.md](linking-and-c-library.md)).
-  These are the two areas this design surfaced real doubt about, not
-  generic caution.
+  `C:o.stubsG` ([linking-and-c-library.md](linking-and-c-library.md)),
+  and RISC OS/POSIX filename duality (`c.main`/`main.c`/`c/main`,
+  `foo.h`/`h/foo`) and colon-path include resolution once the CLX `fname`
+  swap lands ([filenames-and-paths.md](filenames-and-paths.md)). These are
+  the areas this design surfaced real doubt about, not generic caution.
 - Any CI for this project (not designed here — no CI currently exists for
   Norcroft NG) should build with the exact commands in
   [build-and-integration.md](build-and-integration.md)

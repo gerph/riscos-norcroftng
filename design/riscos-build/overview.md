@@ -95,6 +95,10 @@ deeper treatment below instead.
   implemented, what's tested, what's genuinely unresolved.
 - [Relocatable modules](relocatable-modules.md) — current state of
   `-zM`/`-zps`, and a feasibility assessment for later.
+- [Filenames and paths](filenames-and-paths.md) — RISC OS/POSIX filename
+  duality (`c.main`/`main.c`/`c/main`) and colon-path/system-variable
+  handling for includes: a real, user-confirmed requirement, root-caused
+  to a specific gap.
 - [Testing and validation](testing-and-validation.md) — current test
   results, and how to validate ongoing work (including real execution, not
   just codegen assertions).
@@ -103,22 +107,23 @@ deeper treatment below instead.
 
 <Cross-cutting questions spanning more than one area.>
 
-- **How much should this design push into actual environment integration
-  now vs. defer entirely?** This document currently defers all
-  `/riscos-resources` changes to a later, explicitly-directed phase (see
-  Scope above). [build-and-integration.md](build-and-integration.md) still
-  specifies *what* that integration should look like, so that later phase
-  has something concrete to implement from, rather than starting cold.
-  Flagging this as an explicit choice: if you'd rather this design stopped
-  short of specifying the integration shape at all, say so and that
-  section can be trimmed to a one-line pointer instead.
-- **Positioning relative to the existing `riscos-c++`** (2005 Acorn cfront
-  translator): this design proposes pure coexistence — `riscos-n++` is a
-  new, additional tool, and `riscos-c++` is untouched — since nothing in
-  the request asked for a replacement and touching an existing, presumably
-  still-used tool is a bigger and more consequential decision than adding
-  a new one. If eventual replacement/deprecation of `riscos-c++` is
-  actually the intent, that changes the framing of
-  [build-and-integration.md](build-and-integration.md) from "add a tool"
-  to "plan a migration," which is worth saying explicitly rather than
-  assuming.
+(None currently cross-cutting — the two open questions previously here
+are resolved, see Decisions below. Remaining open questions are all
+area-specific; see each area document.)
+
+## Decisions
+
+- **Environment integration: export only, mirroring `cc`'s own pattern.**
+  Confirmed by the user: "we just export the build and let the integration
+  tooling handle the location for installation." This repository builds
+  and names its own output; a separate, already-existing mechanism (the
+  `resources.yaml` manifest convention used by `cc` and other tools in
+  `native-build-tools`) is how those outputs get picked up and placed into
+  `/riscos-resources` — this repository does not do that placement itself,
+  and this design does not need to specify where things ultimately land.
+  See [build-and-integration.md](build-and-integration.md) for the
+  concrete `resources.yaml` shape this implies.
+- **Coexistence with `riscos-c++` confirmed.** Confirmed by the user: "yes
+  we will coexist with CFront." `riscos-n++` is a new, additional tool;
+  `riscos-c++` (the 2005 Acorn cfront-style translator) is untouched, with
+  no migration/replacement implied.

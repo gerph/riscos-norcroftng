@@ -137,12 +137,65 @@ riscos-n++ -apcs 3/32 c/main -c
 riscos-link o/main C:o.stubsG -o main
 ```
 
-Actually copying these binaries into
-`/riscos-resources/Install/Tools/Linux/` and wiring them into whatever
-mechanism decides what's on `PATH` inside a build-environment container is
-explicitly deferred — see [overview.md](overview.md)'s Scope. This section
-exists so that later work has a concrete target to build, not to do that
-work now.
+### Export pattern: mirror `cc`'s `resources.yaml`, don't install directly
+
+Confirmed by the user: this repository should just export its build; a
+separate mechanism handles installing it. That mechanism, concretely, is
+the `resources.yaml` manifest convention already used by the reference
+`cc` tool and other projects in `native-build-tools`. `cc`'s own
+`resources.yaml` declares:
+
+```yaml
+exports:
+  build/crosscompile-cc:
+    phases: native:install
+    upload: false
+    path: $ROTOOL_DIR
+    files:
+      - riscos-cc
+      - riscos-dem
+      - riscos-toansi
+```
+
+i.e. it names the exact files it produces (already using their final
+installed names — `riscos-cc` is both the export name and what ends up at
+`/riscos-resources/Install/Tools/Linux/riscos-cc`), and a `path` variable
+that the outer tooling resolves, not this repo. The proposed equivalent
+for this repository:
+
+```yaml
+exports:
+  build/crosscompile-norcroft-ng:
+    phases: native:install
+    upload: false
+    path: $ROTOOL_DIR
+    files:
+      - riscos-ncc
+      - riscos-n++
+```
+
+This repository's job is then only to make sure files with those exact
+names (`riscos-ncc`, `riscos-n++`) exist somewhere the outer tooling looks
+after a build — copies/renames of `bin/ncc-riscos`/`bin/n++-riscos` — not
+to place them into `/riscos-resources` itself. Actually adding this
+`resources.yaml`, and whatever Makefile step produces the renamed copies,
+is still deferred to the later, explicitly-directed integration phase (see
+[overview.md](overview.md)'s Scope) — this section specifies the *shape*
+so that phase starts from a concrete target.
+
+## Open Questions (continued)
+
+- **Exactly where `resources.yaml`'s `files:` entries are resolved
+  from** wasn't fully traced — `cc`'s own repository has a
+  `riscos-build/Install/Tools/<Host>/` directory (only a `Darwin` one is
+  present in the checked-out copy inspected here) that looks like it could
+  be the staging location a Makefile `install`-type target populates,
+  which `files:` then reads from — but `cc`'s Makefile wasn't traced far
+  enough to confirm this rather than guess it. Before adding
+  `resources.yaml` for real, confirm against `cc`'s actual `install`
+  target (or ask whoever owns the `native-build-tools` packaging
+  convention) whether `files:` names things relative to the repo root,
+  relative to `riscos-build/Install/Tools/<Host>/`, or something else.
 
 ### `riscos-n++` is a language-level C++ compiler only, for now
 
