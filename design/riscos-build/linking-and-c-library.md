@@ -60,21 +60,58 @@ FPA-ABI and a VFP-ABI program linked against the *same* `C:o.stubsG` and
 both ran correctly). Building our own stub libraries would be duplicating
 something the environment already provides correctly.
 
+## Decisions (continued)
+
+### `new`/`delete`/exceptions/RTTI: tested directly, results vary from
+### "needs a two-line shim" to "actively unsafe to use"
+
+Each tested in isolation against `n++-riscos` + `C:o.stubsG`:
+
+- **`operator new`/`operator delete` (non-array forms)**: not provided by
+  `C:o.stubsG` (expected — it's a C library stub, not a C++ runtime).
+  Compiling `new Widget(42)` without them fails to *link*, with clean,
+  ordinary undefined-symbol errors (`__nw__FUi`, `__dl__FPv`). Supplying a
+  two-line user definition —
+  `void *operator new(unsigned int size) { return malloc(size); }` and the
+  `delete` equivalent — compiles and links cleanly. **This specific gap is
+  genuinely small**: a minimal C++ support library providing just these
+  two functions (forwarding to the C library's `malloc`/`free` through
+  `C:o.stubsG`) would cover it, not a large undertaking.
+- **`operator new[]`/`operator delete[]` (array forms)**: overloading
+  these **crashes the compiler itself** — a parser bug misparses
+  `operator new[]`'s `[]` as an array declarator rather than part of the
+  operator name, cascading into type-disagreement errors and ending in
+  `Fatal error: Failure of internal consistency check` (an internal
+  compiler abort, not a normal diagnostic). `new Widget[3]` (using the
+  *implicit*, compiler-generated array-new, not a user-defined
+  `operator new[]`) wasn't separately isolated from this bug and should be
+  checked on its own before assuming it's fine.
+- **Exceptions (`throw`/`try`/`catch`)**: the compiler **segfaults**
+  compiling a plain `try { throw 42; } catch (int e) {}`, after first
+  emitting `Warning: Functionality of C++ keyword may not yet be fully
+  implemented: 'throw'`. Not a graceful rejection — a crash. **`throw` is
+  not just unsupported, it's currently unsafe to write in any code this
+  compiler will see.**
+- **RTTI (`typeid`)**: fails cleanly (ordinary compile errors, no crash) —
+  `<typeinfo>` doesn't exist and `type_info` is unresolved. Same category
+  as the missing standard library generally: absent, but safe.
+
+None of this is about `C:o.stubsG` specifically — once compilation
+succeeds, linking against it has worked in every case tried. These are
+compiler-side gaps (two are outright crashes), not C-library gaps. See
+[build-and-integration.md](build-and-integration.md) for the related, more
+fundamental finding that virtual functions crash at runtime unconditionally
+— a compiler code-generation bug, more urgent than any of the above.
+
 ## Open Questions
 
-- The smoke tests so far are simple (a `printf` call, a float add-and-print,
-  a class with a constructor). `C:o.stubsG`'s actual implementation and
-  exactly which library symbols it resolves at runtime hasn't been
-  inspected directly — only exercised black-box. If a program needs a
-  libc symbol Norcroft NG doesn't emit under the name/convention
-  `C:o.stubsG` expects (unusual name mangling, an unsupported calling
-  convention edge case), that would only surface with broader testing. See
+- The smoke tests so far (this document's included) are still narrow.
+  `C:o.stubsG`'s actual implementation and exactly which library symbols
+  it resolves at runtime hasn't been inspected directly — only exercised
+  black-box. If a program needs a libc symbol Norcroft NG doesn't emit
+  under the name/convention `C:o.stubsG` expects (unusual name mangling,
+  an unsupported calling convention edge case), that would only surface
+  with broader testing. See
   [testing-and-validation.md](testing-and-validation.md) for the plan to
   broaden coverage rather than treating the current smoke tests as proof
   of full compatibility.
-- No investigation has been done yet into whether C++ features needing
-  runtime support beyond plain function calls (exceptions, RTTI,
-  `operator new`/`delete` needing a heap) work against `C:o.stubsG` as-is.
-  The tested C++ example used neither. This matters once real C++ code
-  (not just language-feature tests) is compiled, and is worth a dedicated
-  test pass before calling C++ support "usable" rather than "compiles."

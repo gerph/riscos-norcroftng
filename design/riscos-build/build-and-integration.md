@@ -185,31 +185,71 @@ so that phase starts from a concrete target.
 
 ## Open Questions (continued)
 
-- **Exactly where `resources.yaml`'s `files:` entries are resolved
-  from** wasn't fully traced — `cc`'s own repository has a
-  `riscos-build/Install/Tools/<Host>/` directory (only a `Darwin` one is
-  present in the checked-out copy inspected here) that looks like it could
-  be the staging location a Makefile `install`-type target populates,
-  which `files:` then reads from — but `cc`'s Makefile wasn't traced far
-  enough to confirm this rather than guess it. Before adding
-  `resources.yaml` for real, confirm against `cc`'s actual `install`
-  target (or ask whoever owns the `native-build-tools` packaging
-  convention) whether `files:` names things relative to the repo root,
-  relative to `riscos-build/Install/Tools/<Host>/`, or something else.
+- **Exactly where `resources.yaml`'s `files:` entries are resolved from
+  is partially, not fully, traced.** `cc`'s `ci/riscos.sh` sets
+  `ROTOOL_DIR=${ROTOOL_DIR:-$INSTALL_DIR/Tools/$(uname -s)}` and adds it to
+  `PATH` — confirming `path: $ROTOOL_DIR` in `resources.yaml` does resolve
+  to an `Install/Tools/<Host>/` shape, consistent with the directory
+  actually observed in the checked-out repo. What's *not* confirmed: `cc`'s
+  own `Makefile` has no `install`/`export` target and never references
+  `riscos-build`, `Install/Tools`, or `ROTOOL_DIR` at all — so the actual
+  copy from wherever the Makefile's build output lands (a `COMPONENT=cc`/
+  `TYPE=aif` AMU convention, not a literal `riscos-cc`-named file produced
+  directly) into `$ROTOOL_DIR` under the name `riscos-cc` must happen
+  inside the *shared* `ci/build.sh` harness (itself a submodule shared
+  across many `native-build-tools` projects, not something owned by `cc`).
+  Tracing that shared harness fully is a bigger side-quest than seemed
+  worth it here — it's shared CI infrastructure this design has already
+  deferred touching (see [overview.md](overview.md)'s Scope), and you
+  maintain it, so it's faster to just ask than for me to keep reading a
+  generic harness used by many unrelated projects: does the AMU
+  `COMPONENT`/`TYPE` convention need to be adopted here too for the export
+  to work, or is a plain `bin/ncc-riscos` → `riscos-ncc` copy at a known
+  path enough for the harness to pick up?
 
-### `riscos-n++` is a language-level C++ compiler only, for now
+### `riscos-n++` is a language-level C++ compiler only, for now — and
+### **virtual functions do not work at runtime yet**, which is a bigger
+### caveat than "no standard library"
 
 Confirmed with the user: there is no C++ standard library (no libstdc++
 equivalent) for RISC OS in this environment yet, and building one is not
-part of this design. `riscos-n++` will compile and link C++ *language*
-features (classes, constructors, templates, etc. — all confirmed working
-against the existing `tests/cpp` suite, see
-[testing-and-validation.md](testing-and-validation.md)), and anything a
-program brings via plain C library calls (through `C:o.stubsG`, same as
-`riscos-ncc`), but `#include <vector>` or similar will not work without a
-library that doesn't exist yet. This is worth stating plainly in whatever
-user-facing help text ships with `riscos-n++`, so it's not discovered by
-surprise.
+part of this design. `#include <vector>` or similar will not work without
+a library that doesn't exist yet — expected, and stated plainly here so
+it's not discovered by surprise.
+
+What's *not* just a missing-library gap, and needs to be stated with equal
+prominence: **classes with any virtual function crash at runtime**,
+confirmed with the smallest possible reproduction —
+
+```cpp
+class Base { public: virtual int val() { return 1; } };
+int main() { Base b; return b.val(); }
+```
+
+— compiles and links cleanly, then crashes immediately on entry to
+`_main` under `riscos-run` (Pyromaniac). No inheritance, no `new`, no
+pointer-based polymorphic dispatch — just one virtual method called
+directly on a concrete stack object. This is a compiler code-generation
+or object-layout bug (vtable construction, `this`-pointer handling, or
+similar), not a missing-runtime-support gap — nothing external could fix
+it, since nothing external is even involved yet at this point.
+
+By contrast, confirmed genuinely working: non-virtual member functions,
+constructors/destructors, templates, `static_assert` (all pass in
+`tests/cpp`, see [testing-and-validation.md](testing-and-validation.md)),
+and the earlier hand-tested `Greeter` class in
+[overview.md](overview.md) — none of those use a virtual function. The
+line between "works" and "crashes" here is specifically virtual dispatch,
+not "C++ in general."
+
+This means the honest scope for `riscos-n++` right now is closer to
+**"compiles non-polymorphic C++"** than **"C++ minus a standard
+library"** — a real distinction, since idiomatic C++ leans on virtual
+functions constantly (interfaces, `virtual` destructors on any base
+class meant to be deleted polymorphically, most object-oriented designs).
+This is worth fixing before calling C++ support usable for anything beyond
+templates/toy examples, and is a strictly more urgent problem than the
+library gap above.
 
 ## Open Questions
 

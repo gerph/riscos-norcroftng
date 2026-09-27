@@ -83,6 +83,27 @@ the evidence and reasoning. This freed up the effort that would have gone
 into an ELF backend, which is why floating-point ABI and module support get
 deeper treatment below instead.
 
+## A second finding, less welcome: virtual functions crash at runtime
+
+Hand-testing beyond the existing `tests/cpp` suite (which has no coverage
+of virtual functions, `new`/`delete`, or exceptions) found that **any
+class with a virtual function crashes immediately at runtime**, in the
+smallest possible reproduction (one virtual method, no inheritance, called
+directly on a concrete stack object — not even through a pointer). This
+compiles and links cleanly; it's a runtime crash right on entry to
+`_main`. Two further, separate C++ front-end crashes were found alongside
+it: overloading `operator new[]`/`operator delete[]` aborts the compiler
+with an internal consistency-check failure, and compiling `throw`
+segfaults the compiler outright. None of these are library gaps — they're
+compiler bugs, found by testing directly rather than assumed from the
+existing test suite's pass rate. See
+[build-and-integration.md](build-and-integration.md) and
+[linking-and-c-library.md](linking-and-c-library.md) for the exact
+reproductions. This changes `riscos-n++`'s honest current scope from
+"C++ minus a standard library" to "compiles non-polymorphic C++" — a
+materially smaller claim, and one worth fixing before C++ support is
+presented as usable for anything beyond templates and toy examples.
+
 ## Areas
 
 - [Build and integration](build-and-integration.md) — how the cross-build

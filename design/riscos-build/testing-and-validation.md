@@ -25,6 +25,20 @@ this project ends up with). The point of running it here wasn't to declare
 the compiler "done" — it was to confirm the cross-build is real and
 functional before writing the rest of this design around it.
 
+**The 11/11 `tests/cpp` pass rate is real but narrow, and shouldn't be
+read as "C++ works."** None of those 11 tests use a virtual function,
+`new`/`delete`, or exceptions — and direct hand-testing beyond the suite
+found that virtual functions crash at runtime unconditionally (a compiler
+bug, see [build-and-integration.md](build-and-integration.md)), that
+`operator new[]`/`operator delete[]` crash the *compiler*, and that `throw`
+segfaults the compiler (see
+[linking-and-c-library.md](linking-and-c-library.md) for all three, found
+by testing directly rather than assumed). The suite currently measures
+"the C++ front end parses and generates code for the constructs it has
+tests for," which is a real and useful signal, but a materially smaller
+claim than "C++ works" — worth keeping in mind before quoting the pass
+rate on its own.
+
 ### `runtests.py` checks codegen text, not runtime behaviour
 
 Every test file in `tests/` uses `// RUN: %cc %s -S -o -` plus `// CHECK:`
@@ -67,13 +81,20 @@ today.
   work, extend the test suite with the specific cases flagged elsewhere in
   this design as unverified: varargs functions mixing float/double/int
   arguments under both ABIs
-  ([floating-point.md](floating-point.md)), C++ runtime-support-
-  dependent features (`new`/`delete`, exceptions, RTTI) against
-  `C:o.stubsG` ([linking-and-c-library.md](linking-and-c-library.md)),
-  and RISC OS/POSIX filename duality (`c.main`/`main.c`/`c/main`,
-  `foo.h`/`h/foo`) and colon-path include resolution once the CLX `fname`
-  swap lands ([filenames-and-paths.md](filenames-and-paths.md)). These are
-  the areas this design surfaced real doubt about, not generic caution.
+  ([floating-point.md](floating-point.md)), and RISC OS/POSIX filename
+  duality (`c.main`/`main.c`/`c/main`, `foo.h`/`h/foo`) and colon-path
+  include resolution once the CLX `fname` swap lands
+  ([filenames-and-paths.md](filenames-and-paths.md)). These are the areas
+  this design surfaced real doubt about, not generic caution.
+- Add regression tests for the three concrete C++ bugs found while
+  testing this design (virtual-function runtime crash, `operator new[]`/
+  `operator delete[]` compiler-fatal, `throw` compiler segfault — see
+  [build-and-integration.md](build-and-integration.md) and
+  [linking-and-c-library.md](linking-and-c-library.md)) *once each is
+  fixed*, so none of the three regress silently. Filing these as tests
+  before the fix exists isn't useful (a crash isn't a `// CHECK:`-able
+  assembly assertion) — they belong in whatever bug tracking this project
+  uses, with a note to add the regression test alongside the fix.
 - Any CI for this project (not designed here — no CI currently exists for
   Norcroft NG) should build with the exact commands in
   [build-and-integration.md](build-and-integration.md)
