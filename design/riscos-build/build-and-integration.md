@@ -294,22 +294,46 @@ a tail-call branch if false. `pcrel_vtables` itself
 settable via `-zpu<n>`), which defaults to off (data vtables, matching
 what the call site expects) per its initialisation in `ncc/cfe/pp.c`.
 
-**What I couldn't pin down**: passing `-zpu0` or `-zpu1` explicitly made
-no difference at all to the emitted vtable — always the branch form,
-never a data word, for this simple single-method case. I traced the
-plumbing from the CLI option (`ncc/mip/driver.c`'s `-z` handling) through
-to where it's consumed (`ncc/mip/compiler.c`'s `DoPredefine`, called
-unconditionally via `toolenv_enumerate` during setup) and it all looks
-correctly wired for both C and C++ — so either this specific "simple,
-no this-pointer-adjustment" vtable slot doesn't go through the
-`flowgraf.c` code above at all (most likely — that code's `ptr_adjust_zero`
-branching suggests it may be reached only for the more complex
-multiple-inheritance/this-adjusting-thunk case), or there's a second,
-related bug in how the pragma reaches this decision. I didn't find the
-actual code path that generates *this* simple case's vtable content
-before running out of productive leads by tracing outward from the
-disassembly — this is the next concrete step for whoever picks this up,
-and worth your eyes specifically given how well you know this code.
+**Fully pinned down, with a temporary instrumented build** (added two
+`fprintf(stderr, ...)` diagnostic lines directly in `flowgraf.c`,
+rebuilt, tested, then reverted — nothing kept in the tree). The
+`-zpu0`/`-zpu1` pragma genuinely has no effect here, and now it's clear
+why: **the `target_has_data_vtables`-aware code at `flowgraf.c` ~3106
+never runs at all for this vtable.** The loop that reaches it is guarded
+by a fast-path check a few lines earlier:
+
+```c
+for (i=0; i<n; i++)
+{ BlockHead *b = v[i]->block;
+  if (blkcode_(b)[0].op == J_ORG) goto omit_casebranch;
+}
+```
+
+Confirmed by instrumenting exactly this line: for our vtable's one entry,
+`blkcode_(b)[0].op` **is** `J_ORG` (op 173), every time, so this always
+jumps straight to `omit_casebranch:` — skipping the entire
+`target_has_data_vtables` decision block (the code quoted above) without
+ever evaluating it. Past that label, the block falls through to generic,
+un-specialised code generation, which lowers the underlying `J_TAILCALLK`
+icode the normal way: as a plain tail-call branch instruction. That's the
+`b val__4BaseFv` we see — **it isn't a wrong choice between "data" and
+"thunk" vtables at all; it's a specialised code path being skipped
+entirely** because of the `J_ORG` guard, falling back to generic lowering
+that was never written with `target_has_data_vtables` in mind (it
+predates that distinction, or was never updated for it).
+
+**The fix, precisely scoped**: either make the `J_ORG` fast-path at
+`flowgraf.c` (immediately preceding the `target_has_data_vtables` check
+around line 3106) also respect `target_has_data_vtables` before falling
+through to generic lowering, or work out why `J_ORG` is the first icode
+for this trivial one-entry, zero-adjustment vtable in the first place
+(nothing in `cppfe/xvargen.c` — where vtable content is assembled —
+inserts `J_ORG` directly, so it's arriving from somewhere else in the
+pipeline that wasn't traced further). Either fix should be small and
+localised to `flowgraf.c`'s handling of this one case; I stopped here
+rather than attempt the fix itself, since this was scoped as
+investigation, not implementation — but this is now precise enough to
+fix directly, not just to keep investigating.
 
 ## Open Questions
 
