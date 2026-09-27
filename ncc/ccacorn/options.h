@@ -138,6 +138,9 @@
 #define TARGET_HAS_ASD
 #define TARGET_HAS_DWARF
 
+#define TARGET_VTAB_ELTSIZE  4
+    /* for indirect VTABLEs optimised for single inheritance */
+
 #define RECORD_SOURCE_LOCATION 1
 #define PRETTY_DISASSEMBLY 1
 
