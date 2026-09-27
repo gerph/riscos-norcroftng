@@ -59,24 +59,33 @@ as a confirmed fact rather than a guess, and left out of scope (see
   case, not a fundamental gap. Worth fixing before calling VFP "done," but
   it's a bounded, findable bug, not evidence VFP codegen is broadly
   unreliable (see the other 29 passes).
-- **Varargs marshalling between the two ABIs is the specific area a related
-  project found real trouble in**, and this design's own smoke test (a
-  fixed-arity function returning a `double`, then printed) doesn't
-  exercise that. `pwombwell/aof-toolchain` found it necessary to write a
-  hand-rolled `printf` wrapper (`printf.c` in that project) specifically to
-  convert varargs between VFP and FPA calling conventions when passing
-  floating-point values through a varargs boundary (as `printf("%f", ...)`
-  does), plus dedicated VFP-context startup glue
-  (`vfp_support.s`/`vfp_stack.s`) and a symbol-renaming trick to make an
-  ABI mismatch fail loudly at link time rather than corrupt state at
-  runtime. Our own smoke test happened to pass a `double` through `printf`
-  too and got the right answer — but that project's experience suggests
-  this could be coincidental rather than proof the varargs path is fully
-  correct in general. **This needs a broader, deliberate test pass**
-  (varargs functions taking mixed float/double/int arguments, under both
-  ABIs, checked against `C:o.stubsG`) before either ABI is declared safe
-  for real programs that do this — see
-  [testing-and-validation.md](testing-and-validation.md).
+- **Varargs marshalling between the two ABIs**: tested directly, following
+  through on the concern a related project raised (see below) rather than
+  leaving it as a guess. Wrote a variadic function mixing `int`, `double`,
+  and `float` arguments read via `va_arg`, and a direct `printf("%d %f %d
+  %f\n", ...)` call mixing int and float literals, and ran both under both
+  `-apcs .../fpe3` and `-apcs .../vfp`, linked against `C:o.stubsG`, under
+  `riscos-run`. **Both ABIs produced correct results in every case
+  tried**, including through `printf` itself (not just our own
+  `va_arg`-based function). `pwombwell/aof-toolchain` found it necessary to
+  write a hand-rolled `printf` wrapper specifically to convert varargs
+  between VFP and FPA calling conventions — that trouble didn't reproduce
+  here, at least for these cases; this environment's `C:o.stubsG`/
+  SharedCLibrary appears to already handle both ABIs' varargs marshalling
+  correctly for `printf`. This isn't exhaustive (only `int`/`float`/
+  `double` combinations up to 4 arguments were tried, not structs-by-value
+  or every function in the standard library), but the specific risk raised
+  didn't materialise, and there's no longer a specific reason to expect it
+  will elsewhere.
+  (Note while testing this: a first attempt using C99-style mid-block
+  variable declarations failed to compile under both ABIs identically,
+  with `Serious error: <command> expected but found 'int'` — that's
+  correct, expected behaviour for a strict ANSI C89 compiler like this
+  one, not a bug; declarations must lead a block. Mentioning it only so a
+  future reader hitting the same error doesn't mistake it for another
+  compiler crash — the three genuine ones are catalogued in
+  [linking-and-c-library.md](linking-and-c-library.md) and
+  [build-and-integration.md](build-and-integration.md).)
 - **No decision has been made on a default** ABI when a project doesn't
   specify one explicitly. This environment's own documentation
   (`riscos-help build-and-link`) uses `-apcs 3/32/fpe3` in its 32-bit

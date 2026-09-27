@@ -77,15 +77,15 @@ today.
 
 ## Proposals
 
-- Before relying on either floating-point ABI or C++ support for real
-  work, extend the test suite with the specific cases flagged elsewhere in
-  this design as unverified: varargs functions mixing float/double/int
-  arguments under both ABIs
-  ([floating-point.md](floating-point.md)), and RISC OS/POSIX filename
-  duality (`c.main`/`main.c`/`c/main`, `foo.h`/`h/foo`) and colon-path
-  include resolution once the CLX `fname` swap lands
-  ([filenames-and-paths.md](filenames-and-paths.md)). These are the areas
-  this design surfaced real doubt about, not generic caution.
+- Before relying on C++ support for real work, extend the test suite with
+  RISC OS/POSIX filename duality (`c.main`/`main.c`/`c/main`, `foo.h`/
+  `h/foo`) and colon-path include resolution once the CLX `fname` swap
+  lands ([filenames-and-paths.md](filenames-and-paths.md)). The
+  floating-point varargs case that was on this list has since been tested
+  directly and found working — see [floating-point.md](floating-point.md)
+  — so it's now a candidate for a permanent regression test (turning a
+  one-off hand check into something `runtests.py` runs every time) rather
+  than an open risk.
 - Add regression tests for the three concrete C++ bugs found while
   testing this design (virtual-function runtime crash, `operator new[]`/
   `operator delete[]` compiler-fatal, `throw` compiler segfault — see
