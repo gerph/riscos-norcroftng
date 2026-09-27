@@ -48,7 +48,11 @@ Traced concretely, not inferred:
   `main.c` (plain POSIX name) works today, but that only exercises the
   trivial case; nothing was found or tested that makes `c.main`,
   `c/main`, or the `foo.h`/`h/foo` include case work with the current
-  reimplementation.
+  reimplementation. Given the priority confirmed below (RISC-OS format is
+  the *required* form; the POSIX form is compatibility-only), this means
+  Norcroft NG's own cross-build currently has the priority backwards —
+  it satisfies the optional case and fails the required one — which is
+  exactly what the CLX `fname` swap below is expected to fix.
 
 ### Proposed fix: swap in real CLX's `fname` module
 
@@ -84,54 +88,57 @@ already-standing one. Flagging it here anyway, in case that standing
 decision is itself something you'd want revisited — that's a call above
 this design's scope, not something to silently assume is fine.
 
+### Colon-path/variable expansion for `#include` search: confirmed working
+### against the real `riscos-cc` — my first report of this failing was wrong
+
+An earlier version of this document reported `-IC:` and
+`-I<Lib$Dir>.GetOpt.` both failing against the production `riscos-cc`.
+That was a test-fixture mistake on my part, not a real gap, and the
+record is corrected here rather than left standing.
+
+What actually happened: my test header existed only as a literal
+`marker.h` file. Per the user's clarification below, that POSIX-style form
+is compatibility-only and isn't guaranteed to resolve — the correct,
+required form for a header reachable as `#include <marker.h>` is
+`h/marker` (extension-inverted, RISC-OS style). Once the test fixture had
+`h/marker` (with or without a `marker.h` alongside it), **both syntaxes
+worked correctly** against real `riscos-cc`:
+
+```
+$ export C="/path/to/dir,$C"
+$ riscos-cc -IC: -apcs 3/32 c/t -c        # works: searches every dir listed in $C
+
+$ export LIB_DIR=/path/to
+$ riscos-cc "-I<Lib\$Dir>.GetOpt." -apcs 3/32 c/t -c   # works: LIB_DIR maps to Lib$Dir
+```
+
+The `<Lib$Dir>.GetOpt.` form (correctly written with the trailing `.` —
+my earlier draft dropped it and wrote `GetOptDir` as if it were one name,
+which was my own misreading, not the user's example) is a complete,
+literal command-line argument, resolved directly by the compiler/CLX
+layer at the point the file is opened — confirmed by the user: AMU passes
+command lines through unmodified (it transforms paths/targets/
+dependencies internally for its own dependency graph, not arbitrary
+argument text), so this was never an AMU-level concern to begin with.
+
+### RISC OS format is the required form; POSIX-style names are
+### best-effort compatibility only, not a guarantee
+
+Confirmed directly by the user: *"files are always expected to be RISCOS
+format - the posix form may not work and that's fine because it's only a
+compatibility [aid]."* This resolves the asymmetry the testing above
+surfaced (a bare `marker.h` alone did not resolve; `h/marker` alone did):
+that's correct, expected behaviour, not a bug to fix. The requirement is
+that RISC-OS-format names always work; a plain POSIX-style name working
+too is a nice-to-have this fork inherits from history, not something to
+invest further effort guaranteeing symmetrically for every case.
+
 ## Open Questions
 
-- **Colon-path/system-variable expansion for `#include` search: tested
-  directly against the environment's real, production `riscos-cc`
-  (v5.18) — not just Norcroft NG — and it did not work, in a cleanly
-  isolated test.** The user confirmed the intended syntax
-  (`-IC:` to search every directory listed in variable `C`; `-I<Lib$Dir>.
-  GetOptDir` to substitute `Lib$Dir`'s value, matched host-side by a
-  `LIB_DIR` environment variable, then append `.GetOptDir`) is correct.
-  Isolated the test carefully to rule out confounds:
-  - Confirmed `LIB_DIR` and `C` are both real, already-set environment
-    variables in this container (`LIB_DIR=/riscos-built/Export/Lib`,
-    `C=/riscos-built/Export/Lib/CLib/,/riscos-built/Export/Lib/,...`,
-    already RISC-OS-style comma-separated).
-  - Confirmed a plain literal `-I/absolute/path` works correctly against
-    `riscos-cc` (isolates that basic `-I` parsing and file-open both work
-    at all).
-  - With that same working setup, replacing the literal path with either
-    `-IC:` or `-I"<Lib\$Dir>.GetOptDir"` (both with and without a space
-    after `-I`) **consistently failed** to find a header
-    (`marker.h`/`h/marker`, both forms present) that the literal-path form
-    found without issue.
-  - `riscos-cc -help` documents only the plain form
-    (`-I<directory>   Include <directory> on the #include search path`) —
-    silent on both variable forms, which is consistent with either "not
-    implemented" or "real but undocumented," so the help text doesn't
-    settle it either way.
-  - Source-level: neither `cc`'s own `compiler.c`/`pp.c` nor Norcroft NG's
-    equivalents call CLX's `pathmacro_resolve` (the function that actually
-    implements `<Var>` bracket substitution — read its full source at
-    `Sources/Lib/CLX/c/pathmacro`) anywhere. `cc` opens include files with
-    plain `fopen()`. This is consistent with the empirical failure: the
-    code path that would need to exist to make either syntax work doesn't
-    appear to be wired into the compiler's own file-open logic at all, in
-    either codebase.
-  - **This raises a real fork needing your call, not mine to guess**:
-    is this expansion actually meant to happen a level up — in `riscos-amu`
-    (the Makefile tool), which would expand `<Lib$Dir>`/`Foo:` in Makefile
-    text before ever constructing the command line the compiler sees — so
-    that the compiler binary itself never needs this logic, and Norcroft
-    NG already gets it "for free" the moment it's driven through
-    `riscos-amu` rather than invoked directly (matching how I tested it,
-    bypassing AMU entirely)? Or is direct command-line expansion inside
-    the compiler genuinely expected to work (in which case it doesn't work
-    even in the existing production `riscos-cc` today, which would be
-    worth knowing regardless of this project). I don't have a way to tell
-    these apart from here without either reading `riscos-amu`'s own source
-    or you confirming which layer is supposed to own this.
+None remaining for this area — both parts of the original requirement
+(filename duality, colon-path/variable expansion for includes) are now
+confirmed working against the real production compiler, and the priority
+between RISC-OS and POSIX forms is settled above.
 
 ## Proposals
 
