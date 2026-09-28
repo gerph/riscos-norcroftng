@@ -249,3 +249,28 @@ pre-existing, known VFP failure noted in
 resolves `_Mod$Reloc$Off`/`_Lib$Reloc$Off` when linking a real module is
 still unverified — this only confirms the compiler's codegen is correct in
 isolation. That's the next step.
+
+## End-to-end verified: a real module builds, links, loads, and runs
+
+Hand-built a trivial module (`riscos-project create --type cmodule
+--skeleton`, one added global `int init_count` incremented in `Mod_Init`),
+compiled with `bin/ncc-riscos -zM` (not the installed `riscos-cc`), the
+CMHG header built normally with `riscos-cmunge -32bit`, and linked with an
+entirely ordinary `riscos-link -rmf -rescan -C++ -o rm32/ZMTest
+oz32/modhead oz32/module C:o.stubsGS`:
+
+- **The link succeeds with no undefined-symbol error for
+  `_Mod$Reloc$Off`**, despite nothing in this build ever defining it —
+  confirming `riscos-link` synthesises the symbol itself for `-rmf`
+  (relocatable-module-format) output, resolving the open question above.
+- `riscos-module-parser` confirms a structurally valid 32-bit-safe module
+  (`Title: ZMTest`, `Version: 0.01`).
+- **Actually run under Pyromaniac** (`riscos-run "RMLoad rm32.ZMTest"`):
+  printed `Module ZMTest initialised (count=1)` — the RMA-relocated global
+  was correctly written and read back at its real runtime address, proving
+  the whole delta-relocation chain (codegen, link-time symbol resolution,
+  and the RMA's actual runtime placement) works correctly together, not
+  just in isolated codegen inspection.
+
+This closes the last open item in this document: `-zM` module code
+generation is implemented, tested, and verified working end-to-end.
