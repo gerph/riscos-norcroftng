@@ -2082,6 +2082,15 @@ case s_goto:
         break;
 case s_throw:
         if (!LanguageIsCPlusPlus) goto defaultcase;
+        /* Exception handling is not implemented on this backend: the CSE
+         * pass and the ARM code generator were never extended to handle
+         * the J_TYPECASE dispatch try/catch relies on, so compiling this
+         * further crashes deep in an unrelated optimisation pass rather
+         * than failing cleanly. Fail cleanly here instead, before any of
+         * that codegen is attempted. See the riscos-build design notes
+         * (build-and-integration.md) for the full investigation.
+         */
+        cc_fatalerr(syn_err_try_catch);
         nextsym();
         { Expr* e = 0;
           if (curlex.sym != s_semicolon)
@@ -2092,6 +2101,11 @@ case s_throw:
         }
 case s_try:
         if (!LanguageIsCPlusPlus) goto defaultcase;
+        /* See the comment on the s_throw case above: exception handling
+         * is not implemented on this backend and compiling it further
+         * crashes rather than failing cleanly, so refuse it here.
+         */
+        cc_fatalerr(syn_err_try_catch);
         nextsym();
         c = rd_compound_statement(s_try);
         {   Handler *h = rd_handler();
