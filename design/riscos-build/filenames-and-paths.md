@@ -135,10 +135,28 @@ invest further effort guaranteeing symmetrically for every case.
 
 ## Open Questions
 
-None remaining for this area — both parts of the original requirement
-(filename duality, colon-path/variable expansion for includes) are now
-confirmed working against the real production compiler, and the priority
-between RISC-OS and POSIX forms is settled above.
+- **This gap now concretely blocks `TOOLCHAIN32=norcroftng`** (the
+  cross-compile-docker/`rootenv` selector that routes AMU builds through
+  `riscos-ncc`/`riscos-n++` — see that repository's own
+  `crosscompile/design/gccsdk-4.7-builder.md` for the sibling
+  `TOOLCHAIN32=gcc` work this mirrors). Tried a genuinely unmodified
+  `riscos-project create --type command --skeleton` build through the
+  standard `LibraryCommand` pipeline with `TOOLCHAIN32=norcroftng`: AMU's
+  rule passes the source file as `c/main` (directory-based RISC OS form),
+  and `riscos-ncc` fails with `Error: type of 'c/main' unknown (file
+  ignored)`, reproducing exactly the failure already diagnosed above — the
+  Makefile-level wiring itself is correct and verified separately (a
+  minimal test Makefile confirms `CC`/`C++` resolve to
+  `riscos-ncc`/`riscos-n++`), but no real, unmodified project can build
+  end-to-end until this is fixed. Unlike the `gcc` branch (verified against
+  a real, unmodified project with no changes needed), `norcroftng` is not
+  yet usable for real project builds — it's a mechanically-correct
+  selector pointed at a compiler with this one known, pre-existing gap.
+  The proposed fix below (swap in real CLX's `fname`) would resolve this
+  the same way it resolves the general requirement; not otherwise
+  attempted here, since it's the same substantial, licensing-flagged piece
+  of work already recorded as a proposal, not something to do as a side
+  effect of wiring up a Makefile selector.
 
 ## Proposals
 
