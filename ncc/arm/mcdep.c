@@ -525,7 +525,17 @@ void config_init(ToolEnv *t)
         if (TE_HasValue(t, config_opts[i].name, config_opts[i].val))
             config |= config_opts[i].flag;
 
-    arthur_module = 0;
+    /* -zM / -zM1: generate code suitable for a RISC OS relocatable module
+     * (arthur_module==1) or a library callable by one (arthur_module==2).
+     * Static data is addressed via a runtime delta loaded through R_SL
+     * from the linker symbol _Mod$Reloc$Off/_Lib$Reloc$Off (see gen.c's
+     * arthur_module_relocation()), since a module's data area isn't at a
+     * fixed address until the RMA allocates it. Matches the historical
+     * '-zm'/'-zM' option this fork inherited but never wired up: the tool
+     * env value is set correctly by mcdep_config_option()'s case 'm', but
+     * nothing previously read it back.
+     */
+    arthur_module = TE_Integer(t, "-zm", 0);
 
     integer_load_max = TE_Integer(t, "-zi", INTEGER_LOAD_MAX_DEFAULT);
     ldm_regs_max = TE_Integer(t, "-zr", LDM_REGCOUNT_MAX_DEFAULT);
@@ -557,6 +567,17 @@ void config_init(ToolEnv *t)
     for (i = 0; pcs_opts[i].name != NULL; i++)
         if (TE_HasValue(t, pcs_opts[i].name, pcs_opts[i].val))
             pcs_flags |= pcs_opts[i].flag;
+
+    /* Module code has no stub-provided stack-extension trampoline, so it
+     * must check its own stack use in software; force real checking on
+     * regardless of -apcs.swst/-zps, the same way the historical '-zM'
+     * option was documented to (ccacorn/options.h's help text pairs it
+     * with '-zps1' in every example). A user passing -zps to explicitly
+     * suppress checks in non-module code is unaffected - this only fires
+     * once arthur_module is set.
+     */
+    if (arthur_module)
+        pcs_flags &= ~PCS_NOSTACKCHECK;
 
     {   char const *fpuname = toolenv_lookup(t, "-fpu");
         if (StrEq(fpuname, "#vfp")) {
