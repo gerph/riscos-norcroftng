@@ -15,7 +15,7 @@ modifications), using the repository's own `runtests.py`:
 | `tests/c`     | `ncc-riscos`   | 4/4 pass                         |
 | `tests/fpa`   | `ncc-riscos`   | 30/30 pass                       |
 | `tests/vfp`   | `ncc-riscos`   | 29/30 pass (1 known failure — see [floating-point.md](floating-point.md)) |
-| `tests/cpp`   | `n++-riscos`   | 13/13 pass (11 original + 2 new regression tests, see below) |
+| `tests/cpp`   | `n++-riscos`   | 14/14 pass (11 original + 3 new regression tests, see below) |
 
 This is a small suite overall (the repository is still early in rebuilding
 its regression coverage — see `ncc/tests/` for a separate, older set of
@@ -31,7 +31,8 @@ virtual function, `new`/`delete`, or exceptions — direct hand-testing
 beyond the suite is what actually found that virtual functions crashed at
 runtime unconditionally, and that `operator new[]`/`operator delete[]`
 and `throw` both crashed the *compiler* itself. The first two are now
-fixed, with regression tests added (13/13), but the suite still doesn't
+fixed, with regression tests added (14/14, including `throw` now
+failing cleanly instead of crashing), but the suite still doesn't
 cover exceptions, and — even for the fixed array-new/delete case — only
 covers the trivial-destructor path, not the still-open non-trivial-
 destructor runtime-helper gap (see
@@ -104,14 +105,14 @@ today.
     generate the expected `__nw_v`/`__dl_v` symbols, and actually link and
     run correctly for a trivial-destructor element type.
 
-  `throw` remains open, and was investigated in depth without a fix
-  applied — see [build-and-integration.md](build-and-integration.md).
-  Unlike the other two, it traced to a real, multi-file gap (CSE and the
-  ARM backend both never extended to handle exception-dispatch codegen),
-  not a one-line regression, so there's an open question there about
-  whether to fix it properly (a real feature project) or just make it
-  fail cleanly instead of crashing (small and safe) before any regression
-  test is worth adding for it.
+  `throw`'s crash traced to a real, multi-file gap (CSE and the ARM
+  backend both never extended to handle exception-dispatch codegen), not
+  a one-line regression — genuinely implementing it remains a real
+  feature project, not attempted. Instead, confirmed with the user to
+  take the safe option: `try`/`catch`/`throw` now fail immediately with a
+  clean compile-time error at parse time
+  (`tests/cpp/exceptions/try_catch_rejected.cpp`), rather than eventually
+  crashing deep inside CSE.
 - Any CI for this project (not designed here — no CI currently exists for
   Norcroft NG) should build with the exact commands in
   [build-and-integration.md](build-and-integration.md)

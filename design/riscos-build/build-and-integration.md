@@ -422,28 +422,23 @@ the same category as the still-missing C++ standard library, see
 [linking-and-c-library.md](linking-and-c-library.md)) — a real feature
 project, not a bug fix.
 
-**What this means practically**: `try`/`catch`/`throw` remain unsafe to
-compile. The minimal, safe thing to do — not done here, since it's a
-scope decision, not a fact to discover — would be turning the current
-"warn then eventually crash deep in an unrelated optimisation pass" into
-a clean, immediate compile-time error the moment `try`/`catch`/`throw` is
-parsed, so a user hits a normal diagnostic instead of a segfault. That's
-a small, safe, well-scoped change in its own right (reject cleanly,
-don't implement the feature) — genuinely implementing exception handling
-is a separate, much larger undertaking.
+**Resolved with the safe option**: confirmed with the user — reject
+cleanly rather than attempt the larger feature. `cfe/syn.c`'s `case
+s_throw:`/`case s_try:` now call `cc_fatalerr(syn_err_try_catch)`
+immediately at parse time, before any of the codegen that used to crash
+is reached. `syn_err_try_catch` ("'try-catch' unimplemented") already
+existed in `feerrs.h` but, tellingly, was never actually used anywhere —
+matching the "started, never finished" pattern found throughout this
+investigation. All three isolated repro cases (throw inside try, bare
+throw, empty try/catch) now fail cleanly with `Fatal error: 'try-catch'
+unimplemented` / `Compilation abandoned.` and exit 2, instead of
+segfaulting. Regression test:
+`tests/cpp/exceptions/try_catch_rejected.cpp`. Genuinely implementing
+exception handling remains a separate, much larger undertaking, not
+attempted here.
 
 ## Open Questions
 
-- **Should `try`/`catch`/`throw` be turned into a clean compile-time
-  error now** (small, safe, bounded — see above), **or left as-is
-  pending an actual decision on whether exception-handling support is
-  wanted at all** (a real feature project, given the CSE and codegen gaps
-  found)? Recommend the clean-error change regardless of the bigger
-  decision, since "compiler segfault" is strictly worse than "clear
-  diagnostic" no matter which way the bigger question goes — but flagging
-  it rather than just doing it, since it touches the front end's error
-  handling for a whole language feature, not a self-contained code-gen
-  path like the previous two fixes.
 - Should the eventual `/riscos-resources` integration (deferred per Scope)
   also add a `TOOLCHAIN32`-style selector so existing projects' makefiles
   can opt into Norcroft NG without hardcoding `riscos-n++`/`riscos-ncc`

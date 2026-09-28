@@ -113,12 +113,14 @@ Each tested in isolation against `n++-riscos` + `C:o.stubsG`:
 - **Exceptions (`throw`/`try`/`catch`)**: the compiler **segfaults**
   compiling a plain `try { throw 42; } catch (int e) {}`, after first
   emitting `Warning: Functionality of C++ keyword may not yet be fully
-  implemented: 'throw'`. Not a graceful rejection — a crash. **`throw` is
-  not just unsupported, it's currently unsafe to write in any code this
-  compiler will see.** Investigated in detail (see
+  implemented: 'throw'`. Not a graceful rejection — a crash — and
+  architecturally different from the other two: not a candidate for the
+  same kind of small, localised fix (see
   [build-and-integration.md](build-and-integration.md) for the full
-  write-up) — this one is architecturally different from the other two
-  fixed bugs, not a candidate for the same kind of small, localised fix.
+  investigation). **Now resolved differently**: rather than implementing
+  real exception-handling codegen (a large, separate feature project),
+  `try`/`catch`/`throw` now fail immediately with a clean compile-time
+  error instead of crashing — safe, but still unsupported.
 - **RTTI (`typeid`)**: fails cleanly (ordinary compile errors, no crash) —
   `<typeinfo>` doesn't exist and `type_info` is unresolved. Same category
   as the missing standard library generally: absent, but safe.
