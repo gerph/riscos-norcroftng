@@ -2,10 +2,15 @@
 
 Part of [riscos-n++](overview.md).
 
-This document is **assessment only** — the user has already indicated
-module-specific builds will likely not be supported by this compiler for
-now, and asked specifically for notes on how they might be added later and
-whether that's a large undertaking. Nothing here is being implemented.
+This document was originally **assessment only** — the user asked for
+notes on how `-zM` might be added later and whether that's a large
+undertaking, without building it. A follow-up investigation, prompted by
+the user directly correcting a wrong guess (see below), found and
+verified the actual mechanism, changing the answer from "not verified
+either way, could be a day or two spike" to "confirmed, and it's one
+line." Nothing has been made permanent yet — the verification was done
+with a temporary change, tested, then reverted — pending the user
+deciding whether to finalise it.
 
 ## Decisions
 
@@ -76,54 +81,129 @@ Norcroft's source, since the gap is in Norcroft, not in RISC OS itself):
    wouldn't need to change — Norcroft NG's job would only be #1–#3 above,
    not reimplementing what CMHG already does.
 
-### Feasibility estimate: real, non-trivial, but bounded — not a rewrite
+### Corrected: the real data-access mechanism is `arthur_module`, not the
+### reentrant/static-base APCS variant — found by getting it wrong first
 
-This is not "the AOF writer doesn't support modules so we'd need a new
-backend." The AOF writer, register allocator, and stack-check machinery
-already exist and are already wired together (`-zps` proves the wiring
-works). What's missing is:
+An earlier pass through this investigation found that `-apcs .../reent`
+(a static-base register, `r9`, indirecting through a based-address table)
+was fully implemented and assumed *that* was the mechanism modules would
+need for "changes the way that data regions are accessed" — plausible,
+since it's a real, working, relevant-sounding piece of codegen. **The user
+corrected this directly**, from memory of real module disassembly: the
+actual mechanism loads a new base from an offset from `SL` (`R10`, the
+stack-limit register, repurposed here) and uses that as a delta, with the
+offset itself being a linker-resolved symbol, not a literal number. That
+pointed at a completely different, previously-unnoticed code path:
 
-- Making `-zM` actually flip `PCS_NOSTACKCHECK` off (and any other
-  module-appropriate defaults) instead of being a no-op — likely a small,
-  contained change in `ncc/arm/mcdep.c`/`ncc/mip/driver.c`.
-- Deciding whether Norcroft NG's front end should ever need to know it's
-  compiling towards a module at all, or whether "module-safe object code"
-  is *entirely* achievable via already-working flags
-  (`-zps0`/force-stack-check, plus whatever APCS variant a module needs)
-  with **no CMHG-boundary work required in the compiler** — in which case
-  most of the "gap" is actually just `-zM` needing to become an alias for
-  the right combination of already-working flags, not new code generation.
-  This second possibility is genuinely plausible given how thin the actual
-  missing piece (#1 above) turned out to be on inspection, but hasn't been
-  proven — it would need an actual attempt (build a trivial module by hand
-  with `-zps0` and whatever APCS options seem right, run it through
-  `riscos-cmunge`/`riscos-link`, and see what breaks) to know for sure.
+`ncc/arm/gen.c` (~line 1858) has a block gated on a global int,
+**`arthur_module`** (RISC OS's original development codename) — not
+`PCS_REENTRANT` at all:
 
-Given that, "huge undertaking" looks like the wrong framing. A more
-accurate one: **a small compiler change (making `-zM` do something) plus
-an investigative spike (try building and running an actual module) would
-likely tell you within a day or two of focused work whether this is
-"basically works already" or "needs real new codegen."** The honest
-answer right now is: **not verified either way** — this assessment
-identifies the specific gap and a plausible path, but no module has
-actually been built end-to-end with this compiler, so there could be a
-harder problem hiding in area #2 or #3 above that only shows up once
-something real is attempted.
+```c
+if (arthur_module) {
+    ExtRef *x = symext_(name);
+    if (x && !(x->extflags & xr_code)) {
+        arthur_module_relocation();
+        outinstr(OP_LDR | F_DOWN | F_RD(R_IP) | F_RN(R_SL));
+        outinstr(OP_ADDR | F_RD(r1) | F_RN(R_IP) | r1);
+        DestroyIP();
+    }
+}
+```
+
+This loads through `R_SL` (with a linker-patched negative offset — the
+`F_DOWN` addressing mode, resolved via `arthur_module_relocation()` in
+`gen.c` ~line 990, which imports either the symbol `_Mod$Reloc$Off` or
+`_Lib$Reloc$Off` depending on the module vs. "library callable by a
+module" variant), adds that to the link-time literal address of the data
+item, and uses the result — a genuine runtime relocation-delta, exactly
+matching the user's description and exactly what a module needs: its data
+area's real address isn't known until the RMA allocates it, so every
+static data reference needs this correction.
+
+This is a real, multi-layered mechanism, not a stub: register allocation
+is aware of it (`arm/mcdep.c` ~1192, marks `R_IP` live for `J_ADCON` under
+`arthur_module`), and it has its own semantic check
+(`mip/codebuf.c` ~443: `arthur_module` mode rejects taking the address of
+one static and storing it directly in another, with a proper error,
+`vargen_rerr_datadata_reloc` — a real restriction module code needs, since
+such a reference can't be delta-corrected the same way).
+
+**It's exactly as disconnected from `-zM` as everything else was**:
+`arthur_module` is unconditionally set to `0` in `config_init()`
+(`arm/mcdep.c` ~528) and *nothing else in the entire tree ever sets it to
+anything else* — confirmed by grep. The `arthur_module == 1` / `== 2`
+branches throughout `gen.c`/`mcdep.c`/`codebuf.c` are genuine, reachable,
+correct-looking code that is simply never reached.
+
+### Verified: the fix is one line
+
+`config_init()` already reads other `-z<letter>` options the same way
+(`integer_load_max = TE_Integer(t, "-zi", INTEGER_LOAD_MAX_DEFAULT);`).
+Changing
+
+```c
+arthur_module = 0;
+```
+
+to
+
+```c
+arthur_module = TE_Integer(t, "-zm", 0);
+```
+
+exactly matches the existing `-zM`/`-zM1` convention already documented
+in `ccacorn/options.h`'s help text (`mcdep_config_option`'s `case 'm':`
+computes level `1` for bare `-zM`, `2` for `-zM1` — i.e. `arthur_module`'s
+two branches directly, module vs. library-callable-by-a-module).
+
+Tested with this one-line change, then reverted (nothing committed):
+
+- `-zM` on a global-variable-touching function produces exactly the
+  expected delta-relocation sequence, importing `_Mod$Reloc$Off`.
+- `-zM1` produces the same shape, importing `_Lib$Reloc$Off` instead —
+  confirming both existing branches are reachable and correct via this
+  one change.
+- Full existing test suite (`tests/c`, `tests/fpa`, `tests/vfp`) shows
+  **no regressions** (63 passed / 1 known pre-existing VFP failure,
+  unchanged) — this option is additive, doesn't disturb anything else.
+
+### What's still open
+
+- **`_Mod$Reloc$Off`/`_Lib$Reloc$Off` are not defined anywhere in this
+  build environment's installed libraries** — grepped `/riscos-resources`
+  and `native-build-tools`; the only hit is the reference `cc` tool's own
+  matching source (confirming Norcroft NG faithfully preserved the same
+  mechanism, not that the symbol is available). Whether `riscos-link`
+  synthesises these symbols itself when linking module-type output,
+  whether they come from a module-header veneer `riscos-cmunge` generates,
+  or whether something else needs to provide them, is **unverified** —
+  this determines whether a real module actually links and runs, as
+  distinct from whether the compiler's codegen is correct in isolation
+  (which is now confirmed).
+- Point 1 from the original assessment above (forced software stack
+  checking) is still accurate and still needed alongside this — `-zM`
+  should presumably also force `PCS_NOSTACKCHECK` off, the same way it
+  now needs to set `arthur_module`. Not yet combined/tested together.
+- The CMHG boundary (point 4 above) is unaffected by this finding and
+  still holds: this is only ever the compiler's C-source-to-object-code
+  job; the module header stays `riscos-cmunge`'s.
 
 ## Open Questions
 
-- Should the investigative spike described above (hand-build a trivial
-  module, see what breaks) happen as a small follow-up task even though
-  full module support isn't being built now? It would convert "plausible"
-  above into an actual answer at fairly low cost, and would directly
-  inform whether this stays a "future work" note or becomes a small
-  near-term task. Not blocking anything in this design either way.
+- Given the compiler-side fix is now confirmed small and correct in
+  isolation, the natural next step is the investigative spike already
+  proposed below (hand-build a trivial module, see if `riscos-cmunge`/
+  `riscos-link` actually resolve `_Mod$Reloc$Off` and produce a module
+  that runs) — this is now much more likely to be worth doing soon, since
+  the main unknown left is entirely on the linking/tooling side rather
+  than the compiler side.
 
 ## Proposals
 
-- Treat this document as the record of "why not now" for module support,
-  and revisit it (rather than starting from scratch) whenever module
-  support actually becomes a live priority — the specific gaps identified
-  here (`-zM` inert, no module entry-point convention, unverified AOF
-  attribute needs) should still be accurate unless the compiler changes
-  substantially in the meantime.
+- Make the one-line `config_init()` change permanent, combine it with
+  forcing `PCS_NOSTACKCHECK` off under `-zM`, and add a regression test
+  (codegen-level, matching `-zM`'s expected `_Mod$Reloc$Off` import and
+  delta sequence) — pending the user's go-ahead, since this crosses from
+  "investigate" into "implement," which this session has consistently
+  treated as a separate decision.
