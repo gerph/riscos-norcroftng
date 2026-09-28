@@ -115,7 +115,10 @@ Each tested in isolation against `n++-riscos` + `C:o.stubsG`:
   emitting `Warning: Functionality of C++ keyword may not yet be fully
   implemented: 'throw'`. Not a graceful rejection — a crash. **`throw` is
   not just unsupported, it's currently unsafe to write in any code this
-  compiler will see.**
+  compiler will see.** Investigated in detail (see
+  [build-and-integration.md](build-and-integration.md) for the full
+  write-up) — this one is architecturally different from the other two
+  fixed bugs, not a candidate for the same kind of small, localised fix.
 - **RTTI (`typeid`)**: fails cleanly (ordinary compile errors, no crash) —
   `<typeinfo>` doesn't exist and `type_info` is unresolved. Same category
   as the missing standard library generally: absent, but safe.

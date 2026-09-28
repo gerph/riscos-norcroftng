@@ -355,8 +355,95 @@ slot is a data word; confirmed it fails with the bug reintroduced before
 restoring the fix — see
 [testing-and-validation.md](testing-and-validation.md).
 
+### `throw`/`try`/`catch`: investigated in depth, and this is a genuinely
+### different kind of problem — not fixed, deliberately
+
+Traced with the same discipline as the two fixed bugs (a temporary
+instrumented build — `fprintf` diagnostics added at each candidate crash
+site across `cg.c` and `flowgraf.c`, rebuilt and re-tested at each step,
+then fully reverted with `git checkout` once done — nothing kept in the
+tree). Unlike the previous two, this **isn't a small, localised fix**,
+and no fix was applied.
+
+**Isolating the trigger**: a bare `throw 42;` with no enclosing `try`
+compiles cleanly. An empty `try { } catch (int e) { }` with no `throw`
+inside also compiles cleanly. Only `throw` *inside* a `try` block
+crashes — `throw` elsewhere in the same function, even one that also has
+an unrelated `try`/`catch`, is fine. So the bug is specifically in how
+`try`/`catch` codegen interacts with a `throw` in its body, not in either
+construct alone.
+
+**Tracing the crash itself**: `cg.c`'s `case s_try:` (the code that
+builds the exception-handler dispatch table) runs to completion without
+crashing — confirmed by instrumenting every step inside it. So does the
+subsequent `return 0;` statement's own codegen (`cg_return`, called
+twice — once explicitly, once for an apparent implicit safety-net return
+— both complete cleanly). The crash is later still: inside
+`cse_eliminate()` (`mip/cse.c`), the common-subexpression-elimination
+pass that runs once the whole function body has been code-generated,
+during per-function optimisation (`cg_topdecl2`, before register
+allocation).
+
+**Root cause, as far as traced**: `case s_try:` builds its handler
+dispatch using a jopcode called `J_TYPECASE` — a case/table-like op
+structurally similar to `J_THUNKTABLE`/`J_CASEBRANCH` (already used for
+ordinary vtables and `switch` statements), specifically for matching a
+thrown exception's runtime type against the declared `catch` clauses.
+Grepping for handling of these three related ops together shows a
+pattern repeated in **at least two separate places**: wherever
+`J_THUNKTABLE`/`J_CASEBRANCH` get special-cased, `J_TYPECASE` is
+conspicuously absent, falling through to generic logic that wasn't
+written expecting its shape:
+
+- `mip/csescan.c` (~line 4122): a `switch` on jopcode explicitly lists
+  `case J_THUNKTABLE: case J_CASEBRANCH:` together, recording data used
+  later in the pass (`cmp_r2vals_(&cmpk) = e1`) — `J_TYPECASE` isn't
+  listed, so it silently falls to `default:` instead, skipping that
+  bookkeeping.
+- `arm/gen.c` (~line 2667): the ARM backend's final per-instruction code
+  generator has `case J_TYPECASE: break;` — a **literal no-op**. No
+  actual type-comparison/dispatch instructions are ever emitted for
+  exception handlers on this target, regardless of the crash — meaning
+  even a build that didn't crash here would still not correctly dispatch
+  to the right `catch` clause at runtime, since there's no dispatch code
+  generated at all.
+
+Given `csescan.c`'s handling silently diverges for `J_TYPECASE` in a way
+that (unlike the vtable bug) wasn't traced to one single exact
+instruction, and given the backend's own code generator for it is an
+acknowledged no-op, this reads as **a feature that was started
+(front-end parsing, the `s_try`/`s_catch` AST and dispatch-table
+construction in `cg.c`) and never finished** (CSE awareness, and any
+actual ARM code generation for the type dispatch) — not a one-line
+regression like the other two. Implementing it properly means adding
+`J_TYPECASE` handling to CSE and writing real type-comparison codegen in
+the ARM backend, plus almost certainly a runtime type-matching helper (in
+the same category as the still-missing C++ standard library, see
+[linking-and-c-library.md](linking-and-c-library.md)) — a real feature
+project, not a bug fix.
+
+**What this means practically**: `try`/`catch`/`throw` remain unsafe to
+compile. The minimal, safe thing to do — not done here, since it's a
+scope decision, not a fact to discover — would be turning the current
+"warn then eventually crash deep in an unrelated optimisation pass" into
+a clean, immediate compile-time error the moment `try`/`catch`/`throw` is
+parsed, so a user hits a normal diagnostic instead of a segfault. That's
+a small, safe, well-scoped change in its own right (reject cleanly,
+don't implement the feature) — genuinely implementing exception handling
+is a separate, much larger undertaking.
+
 ## Open Questions
 
+- **Should `try`/`catch`/`throw` be turned into a clean compile-time
+  error now** (small, safe, bounded — see above), **or left as-is
+  pending an actual decision on whether exception-handling support is
+  wanted at all** (a real feature project, given the CSE and codegen gaps
+  found)? Recommend the clean-error change regardless of the bigger
+  decision, since "compiler segfault" is strictly worse than "clear
+  diagnostic" no matter which way the bigger question goes — but flagging
+  it rather than just doing it, since it touches the front end's error
+  handling for a whole language feature, not a self-contained code-gen
+  path like the previous two fixes.
 - Should the eventual `/riscos-resources` integration (deferred per Scope)
   also add a `TOOLCHAIN32`-style selector so existing projects' makefiles
   can opt into Norcroft NG without hardcoding `riscos-n++`/`riscos-ncc`

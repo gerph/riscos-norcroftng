@@ -104,9 +104,14 @@ today.
     generate the expected `__nw_v`/`__dl_v` symbols, and actually link and
     run correctly for a trivial-destructor element type.
 
-  `throw` remains open; add its regression test alongside whichever fix
-  lands for it, the same way — filing a test before the fix exists isn't
-  useful (a compiler crash isn't a `// CHECK:`-able assembly assertion).
+  `throw` remains open, and was investigated in depth without a fix
+  applied — see [build-and-integration.md](build-and-integration.md).
+  Unlike the other two, it traced to a real, multi-file gap (CSE and the
+  ARM backend both never extended to handle exception-dispatch codegen),
+  not a one-line regression, so there's an open question there about
+  whether to fix it properly (a real feature project) or just make it
+  fail cleanly instead of crashing (small and safe) before any regression
+  test is worth adding for it.
 - Any CI for this project (not designed here — no CI currently exists for
   Norcroft NG) should build with the exact commands in
   [build-and-integration.md](build-and-integration.md)

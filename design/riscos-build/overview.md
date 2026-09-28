@@ -112,14 +112,29 @@ flagged, fixed in `cppfe/xsyn.c`; see
 a real, separate gap it surfaced — `new T[n]` for a type with a
 non-trivial destructor needs a runtime helper no C++ library provides
 yet, which is a library gap, not a compiler bug). The second — compiling
-`throw` segfaults the compiler outright — remains open. Neither was a
-library gap in itself; both were compiler bugs, found by testing directly
-rather than assumed from the existing test suite's pass rate. With both
-the virtual-function crash and the `operator new[]`/`operator delete[]`
-crash fixed, `riscos-n++`'s honest current scope is "compiles polymorphic
-C++ including array new/delete for trivial-destructor types, minus a
-standard library, minus exceptions" — better than where this design
-started, with one known compiler crash left (`throw`) rather than three.
+`throw` segfaults the compiler outright — was investigated in depth (see
+[build-and-integration.md](build-and-integration.md)) but **not fixed**:
+unlike the other two, it isn't a small, localised bug. `try`/`catch`
+builds an exception-dispatch jopcode (`J_TYPECASE`) structurally similar
+to the ones already used for vtables and `switch` statements, but several
+places that special-case those (`mip/csescan.c`'s CSE pass, and
+critically the ARM backend's own code generator, which has a literal
+no-op for it) were never extended to handle `J_TYPECASE` too. This reads
+as a feature that was started (parsing, AST, dispatch-table construction)
+and never finished (CSE awareness, actual type-dispatch codegen, likely a
+runtime type-matching helper) — a real feature project, not a bug fix.
+Recorded as an open question whether to at least turn the crash into a
+clean compile-time error in the meantime (small, safe, recommended
+regardless of the bigger decision) versus leaving it as-is pending a call
+on whether exception-handling support is wanted at all.
+
+With both the virtual-function crash and the `operator new[]`/`operator
+delete[]` crash fixed, `riscos-n++`'s honest current scope is "compiles
+polymorphic C++ including array new/delete for trivial-destructor types,
+minus a standard library, minus exceptions" — better than where this
+design started. `throw` remains the one crash left from the original
+three, now precisely diagnosed as a materially bigger undertaking than
+the other two rather than an unknown.
 
 ## Areas
 
