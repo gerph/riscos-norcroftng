@@ -207,3 +207,45 @@ Tested with this one-line change, then reverted (nothing committed):
   delta sequence) — pending the user's go-ahead, since this crosses from
   "investigate" into "implement," which this session has consistently
   treated as a separate decision.
+
+## Made permanent and tested (commit `161b7a8`)
+
+Both halves of the fix are committed to `ncc/arm/mcdep.c` on `riscos-build`,
+each with a regression test in `tests/c/modules/`, each confirmed to
+actually fail with the fix reverted before being restored:
+
+- `tests/c/modules/zm_data_relocation.c` — `-zM` alone, checks for the
+  `_Mod$Reloc$Off` import and the `ldr ip, [r10]` / `add r0, ip, r0` delta
+  sequence around a global-variable reference. Also confirmed by hand that
+  `-zM1` imports `_Lib$Reloc$Off` instead (both branches reachable and
+  correct via the one `TE_Integer(t, "-zm", 0)` change), though only the
+  `-zM` case has a permanent regression test — `-zM1` differs only in which
+  symbol name is imported, so this was judged adequately covered rather
+  than needing a second near-duplicate test.
+- `tests/c/modules/zm_forces_stackcheck_despite_noswst.c` — `-zM` combined
+  with an explicit `-apcs.../noswst`, checks the stack check (`cmp ip,
+  r10` / `blmi __rt_stkovf_split_big`) still appears despite the user's
+  request to suppress it.
+
+**Correction found while building these tests**: the original write-up
+above slightly overstated what needed testing. Software stack checking is
+already on by default for any large-enough stack frame (confirmed: a
+completely plain compile, no `-zM`/`-zps`/`-apcs` at all, already emits the
+check for a 1024-byte frame) — `-zps1` is also already a baked-in default
+`DRIVER_OPTIONS` entry for `TARGET=riscos` (`ccacorn/options.h`), not
+something a user needs to pass. So the `PCS_NOSTACKCHECK`-clearing half of
+this fix isn't needed to get a check to appear at all in the common case —
+it specifically matters only when a user explicitly overrides with
+`-apcs.../noswst`, which is what `zm_forces_stackcheck_despite_noswst.c`
+actually exercises (confirmed: with the fix reverted, that combination
+produces zero stack-check instructions; with it restored, the check
+reappears).
+
+Full existing suite re-run after landing: 79 passed / 1 failed (the same
+pre-existing, known VFP failure noted in
+[testing-and-validation.md](testing-and-validation.md) — no regressions).
+
+**Still open, unchanged from above**: whether `riscos-link` actually
+resolves `_Mod$Reloc$Off`/`_Lib$Reloc$Off` when linking a real module is
+still unverified — this only confirms the compiler's codegen is correct in
+isolation. That's the next step.
