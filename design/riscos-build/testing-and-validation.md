@@ -15,7 +15,7 @@ modifications), using the repository's own `runtests.py`:
 | `tests/c`     | `ncc-riscos`   | 4/4 pass                         |
 | `tests/fpa`   | `ncc-riscos`   | 30/30 pass                       |
 | `tests/vfp`   | `ncc-riscos`   | 29/30 pass (1 known failure — see [floating-point.md](floating-point.md)) |
-| `tests/cpp`   | `n++-riscos`   | 12/12 pass (11 original + 1 new regression test, see below) |
+| `tests/cpp`   | `n++-riscos`   | 13/13 pass (11 original + 2 new regression tests, see below) |
 
 This is a small suite overall (the repository is still early in rebuilding
 its regression coverage — see `ncc/tests/` for a separate, older set of
@@ -29,13 +29,13 @@ functional before writing the rest of this design around it.
 shouldn't have been read as "C++ works."** None of those 11 tests used a
 virtual function, `new`/`delete`, or exceptions — direct hand-testing
 beyond the suite is what actually found that virtual functions crashed at
-runtime unconditionally (now fixed, see
-[build-and-integration.md](build-and-integration.md)), and that
-`operator new[]`/`operator delete[]` and `throw` both crash the *compiler*
-itself (still open, see
-[linking-and-c-library.md](linking-and-c-library.md)). A 12th test
-(the virtual-function regression test) has since been added, but the
-suite still doesn't cover `new[]`/`delete[]` or exceptions — it measures
+runtime unconditionally, and that `operator new[]`/`operator delete[]`
+and `throw` both crashed the *compiler* itself. The first two are now
+fixed, with regression tests added (13/13), but the suite still doesn't
+cover exceptions, and — even for the fixed array-new/delete case — only
+covers the trivial-destructor path, not the still-open non-trivial-
+destructor runtime-helper gap (see
+[linking-and-c-library.md](linking-and-c-library.md)). The suite measures
 "the C++ front end parses and generates code for the constructs it has
 tests for," which is a real and useful signal, but a materially smaller
 claim than "C++ works" — worth keeping in mind before quoting the pass
@@ -92,15 +92,21 @@ today.
   (virtual-function runtime crash, `operator new[]`/`operator delete[]`
   compiler-fatal, `throw` compiler segfault — see
   [build-and-integration.md](build-and-integration.md) and
-  [linking-and-c-library.md](linking-and-c-library.md)). The first is now
-  **fixed**, with a regression test added:
-  `tests/cpp/virtual/vtable_single_method_is_data.cpp` asserts the vtable
-  slot for a single virtual method is a `DCD` data word, not a branch
-  instruction — confirmed to fail (`CHECK not found: 'DCD'`) with the fix
-  reverted, and pass with it restored. The other two remain open; add
-  their regression tests alongside whichever fix lands for each, the same
-  way — filing a test before the fix exists isn't useful (a compiler
-  crash isn't a `// CHECK:`-able assembly assertion).
+  [linking-and-c-library.md](linking-and-c-library.md)). The first two are
+  now **fixed**, each with a regression test added, and each confirmed to
+  actually fail with its fix reverted before the fix was restored (not
+  just trusted to work):
+  - `tests/cpp/virtual/vtable_single_method_is_data.cpp` asserts the
+    vtable slot for a single virtual method is a `DCD` data word, not a
+    branch instruction.
+  - `tests/cpp/operators/new_delete_array_forms.cpp` asserts
+    `operator new[]`/`operator delete[]` parse without a compiler abort,
+    generate the expected `__nw_v`/`__dl_v` symbols, and actually link and
+    run correctly for a trivial-destructor element type.
+
+  `throw` remains open; add its regression test alongside whichever fix
+  lands for it, the same way — filing a test before the fix exists isn't
+  useful (a compiler crash isn't a `// CHECK:`-able assembly assertion).
 - Any CI for this project (not designed here — no CI currently exists for
   Norcroft NG) should build with the exact commands in
   [build-and-integration.md](build-and-integration.md)

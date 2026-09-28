@@ -103,17 +103,23 @@ destructor), with a regression test added
 in the rest of the suite. Full write-up in
 [build-and-integration.md](build-and-integration.md).
 
-Two further, separate C++ front-end crashes remain open, found alongside
-it while testing: overloading `operator new[]`/`operator delete[]` aborts
-the compiler with an internal consistency-check failure, and compiling
-`throw` segfaults the compiler outright. Neither is a library gap —
-they're compiler bugs, found by testing directly rather than assumed from
-the existing test suite's pass rate. See
-[linking-and-c-library.md](linking-and-c-library.md) for the exact
-reproductions. With the virtual-function crash fixed, `riscos-n++`'s
-honest current scope is "compiles polymorphic C++, minus a standard
-library, minus array-new/delete and exceptions" — better than where this
-design started, with two known, bounded gaps left rather than three.
+Two further, separate C++ front-end crashes were found alongside it while
+testing. The first — overloading `operator new[]`/`operator delete[]`
+aborted the compiler with an internal consistency-check failure — is also
+now **fixed** (same pattern: a parser gap the code's own comment already
+flagged, fixed in `cppfe/xsyn.c`; see
+[linking-and-c-library.md](linking-and-c-library.md) for the write-up and
+a real, separate gap it surfaced — `new T[n]` for a type with a
+non-trivial destructor needs a runtime helper no C++ library provides
+yet, which is a library gap, not a compiler bug). The second — compiling
+`throw` segfaults the compiler outright — remains open. Neither was a
+library gap in itself; both were compiler bugs, found by testing directly
+rather than assumed from the existing test suite's pass rate. With both
+the virtual-function crash and the `operator new[]`/`operator delete[]`
+crash fixed, `riscos-n++`'s honest current scope is "compiles polymorphic
+C++ including array new/delete for trivial-destructor types, minus a
+standard library, minus exceptions" — better than where this design
+started, with one known compiler crash left (`throw`) rather than three.
 
 ## Areas
 

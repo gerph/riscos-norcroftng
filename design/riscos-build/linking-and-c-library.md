@@ -77,15 +77,39 @@ Each tested in isolation against `n++-riscos` + `C:o.stubsG`:
   genuinely small**: a minimal C++ support library providing just these
   two functions (forwarding to the C library's `malloc`/`free` through
   `C:o.stubsG`) would cover it, not a large undertaking.
-- **`operator new[]`/`operator delete[]` (array forms)**: overloading
-  these **crashes the compiler itself** — a parser bug misparses
-  `operator new[]`'s `[]` as an array declarator rather than part of the
-  operator name, cascading into type-disagreement errors and ending in
-  `Fatal error: Failure of internal consistency check` (an internal
-  compiler abort, not a normal diagnostic). `new Widget[3]` (using the
-  *implicit*, compiler-generated array-new, not a user-defined
-  `operator new[]`) wasn't separately isolated from this bug and should be
-  checked on its own before assuming it's fine.
+- **`operator new[]`/`operator delete[]` (array forms)**: **fixed** —
+  overloading these used to crash the compiler itself (a parser bug
+  misparsed `operator new[]`'s `[]` as an array declarator rather than
+  part of the operator name, ending in an internal consistency-check
+  abort). Root-caused to `rd_operator_name()` (`cppfe/xsyn.c`) never
+  checking for a following `[` `]` — its own comment already flagged the
+  gap ("need to parse 'operator new[]' and 'operator delete[]' here").
+  Fixed by peeking for the brackets and naming the declaration
+  `__nw_v`/`__dl_v`, matching what the compiler's own array-new/delete
+  codegen already calls. See
+  [build-and-integration.md](build-and-integration.md) for the full
+  write-up and the regression test
+  (`tests/cpp/operators/new_delete_array_forms.cpp`).
+
+  **A second, deeper gap surfaced while fixing this, and remains open**:
+  `new T[n]` only calls the simple `__nw_v(size)` helper (the one a
+  two-argument `operator new[]` override can satisfy) when `T`'s
+  destructor is trivial — confirmed with a plain `int[]` and a
+  no-user-declared-ctor/dtor struct, both linking and running correctly
+  against a hand-written `operator new[]`. For a type *with* a
+  user-declared destructor (like the `Widget` example used to find the
+  original crash), the compiler instead calls a differently-mangled,
+  three-argument helper (`__nw_v__FPvUiT2PFPv_v` — the extra parameter is
+  a destructor-callback, for cleaning up already-constructed elements if
+  a later element's constructor throws). No runtime library provides
+  that helper, and a plain `operator new[](size_t)` override can't satisfy
+  it either — its mangled name is different. This is best understood as
+  a specific, concrete detail of the already-documented "no C++ standard
+  library" gap (see [overview.md](overview.md)), not a new compiler bug:
+  whoever eventually builds a C++ runtime for this project needs to
+  provide that three-argument vector-new/vector-delete helper, wrapping
+  the user's plain `operator new[]`/`operator delete[]` and looping the
+  destructor callback over already-constructed elements on failure.
 - **Exceptions (`throw`/`try`/`catch`)**: the compiler **segfaults**
   compiling a plain `try { throw 42; } catch (int e) {}`, after first
   emitting `Warning: Functionality of C++ keyword may not yet be fully
