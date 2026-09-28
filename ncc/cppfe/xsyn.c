@@ -204,7 +204,6 @@ static DeclRhsList *reinvent_fn_DeclRhsList(Symstr *name, Symstr *realname,
 
 static void rd_operator_name(void)
 {   AEop op = curlex.sym;
-    /*/* need to parse 'operator new[]' and 'operator delete[]' here */
     if (op == s_lbracket || op == s_lpar)
     {    AEop ket;
          if (op == s_lbracket)
@@ -214,6 +213,23 @@ static void rd_operator_name(void)
          nextsym();
          checkfor_ket(ket);
          ungetsym();
+    }
+    else if (op == s_new || op == s_delete)
+    {   /* 'operator new[]' / 'operator delete[]': the array forms are    */
+        /* distinct overloadable functions from 'operator new'/'delete', */
+        /* named to match the mangled names the compiler itself already  */
+        /* calls for 'new T[n]'/'delete[] p' (see xbuiltin.c's            */
+        /* cppsim.xnewvec/xdelvec, declared as "__nw_v"/"__dl_v").        */
+        nextsym();
+        if (curlex.sym == s_lbracket)
+        {   nextsym();
+            checkfor_ket(s_rbracket);
+            ungetsym();
+            curlex.a1.sv = sym_insert_id(op == s_new ? "__nw_v" : "__dl_v");
+            curlex.sym = s_pseudoid;
+            return;
+        }
+        ungetsym();
     }
     curlex.a1.sv = operator_name(op);
     curlex.sym = s_pseudoid;
