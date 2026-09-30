@@ -19,6 +19,21 @@
 
 #define FNAME_ROOTED 0x1
 
+/* Bit in UnparsedName.type recording which on-disk *shape* un->extn/
+ * un->root describes, so fname_unparse knows which one to reconstruct,
+ * and so a caller assembling its own candidate path (eg compiler.c's
+ * #include search - see incl_search()'s own comment) can tell whether
+ * un->extn already came from a directory component.
+ *
+ * Unset (default): un->extn came from a trailing ".ext" on the leafname
+ *   (eg "main.c") - unparse as "root.ext".
+ * Set: un->extn came from the path component immediately before the leaf
+ *   (eg "c/main" - RISC OS's own on-disk convention, where the
+ *   "extension" is a directory, not a dot-suffix) - unparse as
+ *   "ext/root".
+ */
+#define FNAME_EXTN_ASDIR 0x100
+
 typedef struct {
     const char* root;
     size_t rlen;

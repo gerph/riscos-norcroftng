@@ -80,10 +80,13 @@ today.
 
 ## Proposals
 
-- Before relying on C++ support for real work, extend the test suite with
-  RISC OS/POSIX filename duality (`c.main`/`main.c`/`c/main`, `foo.h`/
-  `h/foo`) and colon-path include resolution once the CLX `fname` swap
-  lands ([filenames-and-paths.md](filenames-and-paths.md)). The
+- ~~Before relying on C++ support for real work, extend the test suite
+  with RISC OS/POSIX filename duality (`c.main`/`main.c`/`c/main`,
+  `foo.h`/`h/foo`) and colon-path include resolution once the CLX `fname`
+  swap lands~~ — **done**: `ncc-support/fname.c` was reimplemented fresh
+  (not a CLX swap — see [filenames-and-paths.md](filenames-and-paths.md)'s
+  "Fixed" section for why), with six new regression tests in
+  `tests/c/fname/` covering exactly this. The
   floating-point varargs case that was on this list has since been tested
   directly and found working — see [floating-point.md](floating-point.md)
   — so it's now a candidate for a permanent regression test (turning a

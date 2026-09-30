@@ -1,0 +1,1 @@
+int fname_riscos_form_probe(void) { return 1; }

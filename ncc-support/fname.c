@@ -16,7 +16,9 @@
 #include "fname.h"
 
 #include <ctype.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static int is_sep(int c) { return c=='/' || c=='\\'; }
 static int match_suffix(const char *ext, size_t elen, const char *list) {
@@ -42,19 +44,45 @@ static int match_suffix(const char *ext, size_t elen, const char *list) {
     return 0;
 }
 
+/* A bare "NAME:" prefix (no slash before the colon, and not at position 0 -
+ * so a leading "/" is never mistaken for one) is RISC OS's own
+ * library-search-variable convention, used directly by this environment's
+ * own Makefiles (eg "-IC:"). Only recognised when there's no slash before
+ * it, matching real CLX's own volume-prefix detection - a colon appearing
+ * after a '/' (eg inside a genuine path component) is never a volume. */
+static int find_volume_prefix(const char *s, size_t *vlen)
+{
+    const char *p;
+    for (p = s; *p && !is_sep(*p); ++p) {
+        if (*p == ':' && p != s) {
+            *vlen = (size_t)(p - s);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void unix_fname_parse(const char *file,
                              const char *suffixlist,
                              UnparsedName *un)
 {
     const char *s, *last_sep, *p, *leaf, *last_dot;
-    size_t len;
+    size_t len, vlen;
 
     memset(un, 0, sizeof *un);
     if (!file)
         return;
 
     s = file;
-    len = strlen(file);
+
+    if (find_volume_prefix(s, &vlen)) {
+        un->vol = s;
+        un->vlen = vlen;
+        un->type |= FNAME_ROOTED;
+        s = s + vlen + 1;
+    }
+
+    len = strlen(s);
 
     // Rooted?
     if (len && (is_sep(s[0]))) {
@@ -101,6 +129,35 @@ static void unix_fname_parse(const char *file,
         un->elen = 0;
     }
 
+    // RISC OS's own on-disk convention writes the "extension" as the
+    // directory immediately containing the leaf (eg "c/main", "h/foo")
+    // rather than a dot-suffix. Recognise it whenever the leaf itself had
+    // no dot-suffix extension, by checking the last path component
+    // against the same suffix list - this is what makes a real AMU
+    // Makefile's "c/main"/"h/foo" arguments and #include candidates work
+    // (see design/riscos-build/filenames-and-paths.md). Doesn't need an
+    // existence check: unlike "main.c" (ambiguous - might genuinely mean
+    // the literal file, see driver.c/compiler.c's own fallback handling),
+    // a path already written in this directory-first shape is
+    // unambiguous.
+    if (!un->extn && un->plen > 0 && suffixlist) {
+        const char *dirleaf = un->path + un->plen - 1; /* the separator just before the leaf */
+        const char *prev_sep = NULL;
+        const char *q;
+        for (q = un->path; q < dirleaf; ++q)
+            if (is_sep(*q)) prev_sep = q;
+        {
+            const char *comp = prev_sep ? prev_sep + 1 : un->path;
+            size_t complen = (size_t)(dirleaf - comp);
+            if (match_suffix(comp, complen, suffixlist)) {
+                un->extn = comp;
+                un->elen = complen;
+                un->type |= FNAME_EXTN_ASDIR;
+                un->plen = (size_t)(comp - un->path);
+            }
+        }
+    }
+
     un->un_pathlen = 0;
 }
 
@@ -108,6 +165,66 @@ static void unix_fname_parse(const char *file,
 void fname_parse(const char *fname, const char *suffixlist, UnparsedName *un)
 {
     return unix_fname_parse(fname, suffixlist, un);
+}
+
+/* Uppercase a "NAME"/"Name" volume/variable reference into an environment
+ * variable name, turning '$' into '_' the same way this environment's own
+ * shared Makefiles already do for eg "Lib$Dir" -> "LIB_DIR" (see
+ * crosscompile/help/makefiles.md's variable-naming convention). */
+static void env_name_from_ref(const char *ref, size_t len, char *out, size_t outsz)
+{
+    size_t i;
+    for (i = 0; i < len && i + 1 < outsz; ++i) {
+        char c = ref[i];
+        out[i] = (c == '$') ? '_' : (char)toupper((unsigned char)c);
+    }
+    out[i] = '\0';
+}
+
+/* Expand "<VAR>" references embedded anywhere in a RISC OS style path
+ * argument (eg "<Lib$Dir>.GetOpt."), writing the result (with every
+ * remaining '.' converted to '/', matching RISC OS's own dot-as-directory-
+ * separator convention for a path with no real slashes) into out. A
+ * reference to an unset variable is left as literal "<VAR>" text, which
+ * will simply fail to open later - graceful, not a crash. */
+static size_t expand_path_text(const char *text, size_t len, char *out, size_t n, size_t maxName)
+{
+    const char *s = text, *end = text + len;
+    while (s < end && n + 1 < maxName) {
+        if (*s == '<') {
+            const char *close = memchr(s, '>', (size_t)(end - s));
+            if (close) {
+                char envname[64], value[256];
+                env_name_from_ref(s + 1, (size_t)(close - s - 1), envname, sizeof envname);
+                {
+                    const char *v = getenv(envname);
+                    size_t vlen;
+                    if (!v) { value[0] = '\0'; vlen = 0; }
+                    else { strncpy(value, v, sizeof value - 1); value[sizeof value - 1] = '\0'; vlen = strlen(value); }
+                    if (v) {
+                        size_t m = vlen;
+                        if (m > maxName - 1 - n) m = maxName - 1 - n;
+                        memcpy(out + n, value, m);
+                        n += m;
+                        s = close + 1;
+                        /* RISC OS: "<Var>.tail" means value/tail - the dot
+                         * right after the reference is a separator, not
+                         * literal text. */
+                        if (s < end && *s == '.') {
+                            if (n + 1 < maxName) out[n++] = '/';
+                            ++s;
+                        }
+                        continue;
+                    }
+                }
+            }
+            /* No '>' found, or variable unset: copy the '<' literally and
+             * carry on - see the function comment. */
+        }
+        out[n++] = (*s == '.') ? '/' : *s;
+        ++s;
+    }
+    return n;
 }
 
 int fname_unparse(UnparsedName *un,
@@ -118,43 +235,92 @@ int fname_unparse(UnparsedName *un,
     size_t n = 0;
     if (!out || maxName==0) return 0;
 
+    /* "-IC:"-style volume/variable prefix - expand a single-directory
+     * environment value directly; a genuinely multi-directory value (or
+     * an unset one) is left as literal "NAME:" text instead. This matches
+     * the real riscos-cc's own behaviour, including its same limitation
+     * for a multi-directory value (confirmed empirically against the
+     * installed tool, not assumed - see design/riscos-build/
+     * filenames-and-paths.md), not a gap this reimplementation adds. */
+    if (un->vol) {
+        char envname[64];
+        const char *value;
+        env_name_from_ref(un->vol, un->vlen, envname, sizeof envname);
+        value = getenv(envname);
+        if (value && !strchr(value, ',')) {
+            size_t m = strlen(value);
+            if (m > maxName-1) m = maxName-1;
+            memcpy(out, value, m);
+            n = m;
+            if (n && out[n-1] != '/' && n < maxName-1)
+                out[n++] = '/';
+        } else {
+            size_t m = un->vlen;
+            if (m > maxName-1) m = maxName-1;
+            memcpy(out, un->vol, m);
+            n = m;
+            if (n < maxName-1) out[n++] = ':';
+        }
+    }
+
     // path
     if (un->plen) {
         size_t m = un->plen;
-        if (m > maxName-1) m = maxName-1;
-        memcpy(out, un->path, m);
+        if (m > maxName-1-n) m = maxName-1-n;
+        memcpy(out+n, un->path, m);
         n += m;
     }
     if (how == FNAME_AS_PATH) {
-        /* If it looks like a directory (no extension), keep the leaf too. */
+        /* If it looks like a directory (no extension), keep the leaf too.
+         * The leaf itself may still be a dotted RISC OS path fragment (eg
+         * "<Lib$Dir>.GetOpt.") rather than a single plain name, so run it
+         * through expand_path_text() rather than a plain copy. */
         if (un->elen == 0 && un->rlen > 0) {
-            size_t m;
-
+            int is_dot_marker = (un->rlen == 1 && un->root[0] == '.')
+                              || (un->rlen == 2 && un->root[0] == '.' && un->root[1] == '.');
             if (n && out[n-1] != '/' && out[n-1] != '\\' && n < maxName-1)
                 out[n++] = '/';
-            m = un->rlen;
-            if (m > maxName-1-n)
-                m = maxName-1-n;
-            memcpy(out+n, un->root, m);
-            n += m;
-
-            out[n++] = '/';
+            if (is_dot_marker) {
+                /* A bare "." or ".." is the ordinary Unix relative-
+                 * directory marker (eg from "-I." or "-I.."), not a
+                 * RISC OS dotted path fragment - leave its dot(s) alone
+                 * rather than running it through expand_path_text(),
+                 * which would otherwise turn "-I." into "-I/". */
+                size_t m = un->rlen;
+                if (m > maxName-1-n) m = maxName-1-n;
+                memcpy(out+n, un->root, m); n += m;
+            } else {
+                n = expand_path_text(un->root, un->rlen, out, n, maxName);
+            }
+            if (n < maxName-1) out[n++] = '/';
         }
 
         out[n] = '\0';
         return (int)n;
     }
 
-    // name = root [ "." ext ]
-    if (un->rlen && n < maxName-1) {
-        size_t m = un->rlen; if (m > maxName-1-n) m = maxName-1-n;
-        memcpy(out+n, un->root, m); n += m;
-    }
-    if (un->elen && n+1 < maxName-1) {
-        size_t m;
-        out[n++] = '.';
-        m = un->elen; if (m > maxName-1-n) m = maxName-1-n;
-        memcpy(out+n, un->extn, m); n += m;
+    // name = ext "/" root (RISC OS on-disk shape), or root "." ext (literal)
+    if (un->type & FNAME_EXTN_ASDIR) {
+        if (un->elen && n < maxName-1) {
+            size_t m = un->elen; if (m > maxName-1-n) m = maxName-1-n;
+            memcpy(out+n, un->extn, m); n += m;
+            if (n < maxName-1) out[n++] = '/';
+        }
+        if (un->rlen && n < maxName-1) {
+            size_t m = un->rlen; if (m > maxName-1-n) m = maxName-1-n;
+            memcpy(out+n, un->root, m); n += m;
+        }
+    } else {
+        if (un->rlen && n < maxName-1) {
+            size_t m = un->rlen; if (m > maxName-1-n) m = maxName-1-n;
+            memcpy(out+n, un->root, m); n += m;
+        }
+        if (un->elen && n+1 < maxName-1) {
+            size_t m;
+            out[n++] = '.';
+            m = un->elen; if (m > maxName-1-n) m = maxName-1-n;
+            memcpy(out+n, un->extn, m); n += m;
+        }
     }
     out[n] = '\0';
 

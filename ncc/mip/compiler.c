@@ -956,6 +956,7 @@ static FILE *try_instore_file(const char *file, pp_uncompression_record **urp)
 #endif /* NO_INSTORE_FILES */
 
 static FILE *incl_search(char const *file, const char *new_file,
+                         const char *alt_file,
                          bool systemheader,
                          pp_uncompression_record **urp,
                          char const **hostname)
@@ -998,6 +999,30 @@ static FILE *incl_search(char const *file, const char *new_file,
                 else if (FILES_DEBUG_LEVEL(1))
                     cc_msg("File '%s' not found.\n", current);
             }
+            /* RISC OS's own on-disk convention writes a header's
+             * "extension" as its containing directory (eg "h/marker" for
+             * <marker.h>) rather than a dot-suffix. new_file above is the
+             * literal dot-suffix form (kept as the first choice so an
+             * existing literal "foo.h" still wins, matching how this is
+             * handled for the primary source file in driver.c); try the
+             * RISC OS form in the same directory before moving on - see
+             * design/riscos-build/filenames-and-paths.md. */
+            if (alt_file != NULL)
+            {   strcpy(current, p->name);
+                if (strlen(current) + strlen(alt_file) + 1 <= MAX_NAME)
+                {   strcat(current, alt_file);
+                    if ((new_include_file = trackfile_open(current, "r")) != NULL)
+                    {   if (debugging(DEBUG_FILES))
+                            cc_msg("Opened file '%s'\n", current);
+                        if (!(systemheader && (ccom_flags & FLG_NOSYSINCLUDES)))
+                            show_h_line(1, current, YES);
+                        *hostname = push_include(current, current);
+                        return new_include_file;
+                    }
+                    else if (FILES_DEBUG_LEVEL(1))
+                        cc_msg("File '%s' not found.\n", current);
+                }
+            }
         }
         p = p->link;
     }
@@ -1035,13 +1060,31 @@ extern FILE *pp_inclopen(char const *file, bool systemheader,
   FILE *new_include_file;
   UnparsedName unparse;
   char new_file[MAX_NAME];
+  char alt_file_buf[MAX_NAME];
+  const char *alt_file = NULL;
 
   *hostname = file;
   translate_fname(file, &unparse, new_file);
 
+  /* Besides the literal dot-suffix form above, also offer RISC OS's own
+   * on-disk "extension-as-directory" form (eg "h/marker" for <marker.h>)
+   * as a second candidate - see incl_search()'s own comment. Only
+   * meaningful when translate_fname() found a genuine dot-suffix
+   * extension; if the include was already written in RISC OS form (or has
+   * no recognised extension at all), new_file already covers it. */
+  if (unparse.extn != NULL && !(unparse.type & FNAME_EXTN_ASDIR)
+      && unparse.elen + 1 + unparse.rlen + 1 <= sizeof alt_file_buf)
+  {   char *p = alt_file_buf;
+      memcpy(p, unparse.extn, unparse.elen); p += unparse.elen;
+      *p++ = '/';
+      memcpy(p, unparse.root, unparse.rlen); p += unparse.rlen;
+      *p = '\0';
+      alt_file = alt_file_buf;
+  }
+
   if (!(unparse.type & FNAME_ROOTED))
-  {   new_include_file = incl_search(file, new_file, systemheader, urp,
-                                     hostname);
+  {   new_include_file = incl_search(file, new_file, alt_file, systemheader,
+                                     urp, hostname);
 #ifdef RETRY_INCLUDE_LOWERCASE
       if (new_include_file == NULL)
       {   bool not_all_lowercase = NO;
@@ -1053,8 +1096,8 @@ extern FILE *pp_inclopen(char const *file, bool systemheader,
                   p[-1] = tolower(c);
               }
           if (not_all_lowercase)
-              new_include_file = incl_search(file, new_file, systemheader,
-                                             urp, hostname);
+              new_include_file = incl_search(file, new_file, alt_file,
+                                             systemheader, urp, hostname);
       }
 #endif
       if (new_include_file != NULL && usrdbg(DBG_PP))

@@ -1,0 +1,1 @@
+int fname_literal_wins(void) { return 1; }

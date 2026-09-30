@@ -57,6 +57,9 @@ extern int  system();
 #include <signal.h>
 #undef uint
 #include <setjmp.h>
+#ifdef COMPILING_ON_UNIX
+#include <unistd.h>
+#endif
 
 #include "globals.h"
 #include "errors.h"
@@ -905,6 +908,32 @@ static void process_file_names(ToolEnv *t, ArgV *v)
       }
 
       fname_parse(current, FNAME_SUFFIXES, &unparse);
+
+#ifdef COMPILING_ON_UNIX
+      /* RISC OS's own on-disk convention writes a source file's
+       * "extension" as its containing directory (eg "c/main"), not a
+       * dot-suffix - and a real AMU Makefile always passes it that way.
+       * fname_parse() already recognises that form directly when given.
+       * For the historically-supported literal POSIX form (eg "main.c"),
+       * prefer it when it genuinely exists - keeping every existing test
+       * in this suite, which invokes the compiler with a bare "*.c" path
+       * directly, working unchanged - but fall back to the RISC OS form
+       * when it doesn't. See design/riscos-build/filenames-and-paths.md
+       * for the decision record and why an unconditional conversion
+       * (matching the real riscos-cc exactly) isn't used here instead. */
+      if (unparse.extn != NULL && !(unparse.type & FNAME_EXTN_ASDIR)
+          && access(current, 0) != 0) /* 0 == F_OK; some hosts don't expose it under -std=gnu89 */
+      {   size_t n = unparse.plen + unparse.elen + 1 + unparse.rlen + 1;
+          char *riscos_form = (char *)PermAlloc((int32)n);
+          char *p = riscos_form;
+          memcpy(p, unparse.path, unparse.plen); p += unparse.plen;
+          memcpy(p, unparse.extn, unparse.elen); p += unparse.elen;
+          *p++ = '/';
+          memcpy(p, unparse.root, unparse.rlen); p += unparse.rlen;
+          *p = '\0';
+          fname_parse(riscos_form, FNAME_SUFFIXES, &unparse);
+      }
+#endif
 
 #ifndef COMPILING_ON_UNIX
       if (unparse.extn == NULL)

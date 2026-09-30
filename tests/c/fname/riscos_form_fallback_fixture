@@ -1,0 +1,1 @@
+int fname_riscos_form_fallback_used(void) { return 1; }

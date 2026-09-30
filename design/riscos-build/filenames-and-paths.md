@@ -54,7 +54,16 @@ Traced concretely, not inferred:
   it satisfies the optional case and fails the required one — which is
   exactly what the CLX `fname` swap below is expected to fix.
 
-### Proposed fix: swap in real CLX's `fname` module
+### Proposed fix: swap in real CLX's `fname` module — superseded, see "Fixed" below
+
+**Not what was built.** Asked to choose between this and a fresh
+reimplementation, Charles chose the reimplementation (the unlicensed
+ARM/Pace copyright on CLX's own `fname` source is a different risk once
+it's vendored into Norcroft NG's own redistributed, Apache-2.0 tree, versus
+CLX being used as build-environment infrastructure elsewhere). Kept here
+for the historical record of the option considered, not as a live plan —
+see "Fixed: `ncc-support/fname.c` reimplemented fresh, not vendored" for
+what was actually done.
 
 Replace `ncc-support/fname.c` and `ncc-support/fname.h` with the real CLX
 `c/fname` and `h/fname` sources (adjusted only as needed for this
@@ -133,36 +142,124 @@ that RISC-OS-format names always work; a plain POSIX-style name working
 too is a nice-to-have this fork inherits from history, not something to
 invest further effort guaranteeing symmetrically for every case.
 
+## Fixed: `ncc-support/fname.c` reimplemented fresh, not vendored
+
+**Charles's direction**: fix the fname problems "in a similar way to the
+CLX fname functions work so that we have the same behaviour in the
+NorcroftNG system as the cc system" — but, when asked to choose between
+vendoring CLX's actual source (this document's original Proposal) and a
+fresh reimplementation, Charles chose the latter explicitly: CLX's
+`c/fname`/`h/fname` carry an unlicensed ARM/Pace copyright (see "A
+licensing fact worth recording plainly" below, unchanged), and vendoring
+them directly into Norcroft NG's own Apache-2.0 source tree is a different
+risk from CLX being used as build-environment infrastructure elsewhere,
+which isn't redistributed as part of Norcroft NG's own source. The
+reimplementation lives entirely in `ncc-support/fname.c`, its header
+`ncc-support/fname.h`, plus two small, explained departures in
+`ncc/mip/driver.c` and `ncc/mip/compiler.c` (see below) — verified against
+the real, installed `riscos-cc` throughout, not against the CLX source
+read in isolation.
+
+### One behaviour genuinely differs from real `riscos-cc`, by deliberate choice
+
+Empirically confirmed (not assumed): the real `riscos-cc` **never** tries
+a literal POSIX name once it recognises an extension — given `t.c`, it
+converts unconditionally to `c/t` and looks only there, even when a
+literal `t.c` exists right beside it and no `c/t` does (reproduced
+directly: `riscos-cc t.c -c` with only `t.c` on disk reports
+`Compilation aborted: couldn't read file 'c/t'`). Matching that exactly
+would have broken every one of the ~80 pre-existing Norcroft NG tests in
+this suite, which invoke the compiler with a bare `*.c`/`*.cpp` path
+directly (no `c/` subdirectory) — asked directly, Charles chose **try the
+literal name first, then fall back to the RISC OS form** as a deliberate
+superset of `riscos-cc`'s own behaviour, over faithfully matching it and
+restructuring the whole test suite's invocation convention. This is
+implemented per callsite, not inside `fname_parse`/`fname_unparse`
+themselves (which stay pure string transforms, doing no filesystem
+access, matching CLX's own architecture):
+
+- **The primary source file argument** (`driver.c`'s `process_file_names`,
+  `FNAME_SUFFIXES`): after the ordinary parse, if the recognised extension
+  came from a literal dot-suffix (not already RISC OS "extension-as-
+  directory" form) and the literal name doesn't exist on disk
+  (`access(current, 0)`), re-synthesise the RISC OS form (eg `main.c` ->
+  `c/main`) and re-parse it — this single location has one unambiguous
+  "does the file I'm about to compile exist" check available, so the
+  fallback decision can live right here.
+- **`#include` resolution** (`compiler.c`'s `pp_inclopen`/`incl_search`,
+  `FNAME_INCLUDE_SUFFIXES`): an include name has no single "does it
+  exist" check available at parse time — it has to be tried against
+  *each* `-I` search directory in turn, and `fname_parse` has no idea
+  which directories those will be. So the existence-based choice doesn't
+  belong in `fname.c` at all here: `pp_inclopen` now computes a second,
+  RISC-OS-form candidate string (`<ext>/<root>`, eg `h/marker` for
+  `<marker.h>`) alongside the existing literal one, and `incl_search`
+  tries both, literal first, in the same directory before moving to the
+  next — this is the one place the design doc's original "no
+  `driver.c`/`compiler.c` changes needed" assumption (written when
+  vendoring CLX exactly was still the plan) didn't hold, and is flagged
+  here explicitly rather than silently expanded in scope.
+
+A new `FNAME_EXTN_ASDIR` bit on `UnparsedName.type` (`fname.h`) records
+which on-disk shape a parsed name is in, so `fname_unparse` knows whether
+to reconstruct `root.ext` (literal) or `ext/root` (RISC OS form), and so
+`compiler.c` can tell whether a second candidate is even meaningful (an
+include already written in RISC OS form, or with no recognised extension
+at all, needs no second candidate).
+
+### Colon-path and `<Var>` expansion, including matching `riscos-cc`'s own limitation
+
+`-IVAR:` (a bare environment-variable-as-volume prefix, this environment's
+own `-IC:` convention) and `-I<Var>.tail.` (an embedded variable reference
+inside an otherwise-dotted path, eg the real `-I<Lib$Dir>.GetOpt.`) are
+both now expanded in `fname_unparse`, via `getenv()` on the variable name
+uppercased with `$` turned into `_` (matching how this environment's own
+shared Makefiles name the corresponding variable, eg `Lib$Dir` <->
+`LIB_DIR`). Verified against the real `riscos-cc` for both forms before
+implementing (not assumed from reading CLX's source alone): a
+**single**-directory environment value expands correctly; a genuinely
+**multi**-directory (comma-joined) value is left as literal, unopenable
+`VAR:` text and the whole `-I` argument silently fails to resolve anything
+— confirmed as `riscos-cc`'s own real behaviour (CLX's own
+`faked_envvar_path` comment says as much: "Multi-path element - give up
+and let the parent deal with it" — and nothing else does), not a gap this
+reimplementation introduces or should try to improve on.
+
+One correction found while testing this against real fixtures, not
+assumed from the CLX source: a bare `-I.`/`-I..` (the ordinary Unix
+relative-directory marker) must **not** have its dot(s) converted to `/`
+the way a genuine RISC-OS dotted path fragment's dots are — an
+unqualified "any slash-free argument's dots are RISC OS directory
+separators" rule turns `-I.` into `-I/`. Fixed by exempting a bare `.`/
+`..` specifically in `fname_unparse`'s path-reconstruction, before it
+reaches the general dot-to-slash conversion.
+
+### Verification
+
+Six new regression tests in `tests/c/fname/` (each confirmed to actually
+compile correctly, added to the permanent suite): RISC-OS-form primary
+source file (`c/main`), literal-preferred-when-both-exist, literal-
+missing-falls-back, `#include` RISC-OS-form fallback, `-IVAR:` expansion,
+and `-I<Var>.tail.` expansion. Full suite after: 85 passed, 1 known
+pre-existing VFP failure (unchanged) — no regressions.
+
+End-to-end, real-tool verification beyond the unit-style tests above: a
+genuinely unmodified `riscos-project create --type command --skeleton`
+project, built through the standard `LibraryCommand` AMU pipeline with
+`TOOLCHAIN32=norcroftng` (cross-compile-docker's `rootenv` selector — see
+that repository's own commit), compiles and links cleanly
+(`riscos-ncc ... c/main` -> `riscos-link ... -> All built`) and **runs
+correctly under Pyromaniac**, printing its expected help/version text —
+resolving the concrete blocker recorded below, not just the isolated
+compiler bug.
+
 ## Open Questions
 
-- **This gap now concretely blocks `TOOLCHAIN32=norcroftng`** (the
-  cross-compile-docker/`rootenv` selector that routes AMU builds through
-  `riscos-ncc`/`riscos-n++` — see that repository's own
-  `crosscompile/design/gccsdk-4.7-builder.md` for the sibling
-  `TOOLCHAIN32=gcc` work this mirrors). Tried a genuinely unmodified
-  `riscos-project create --type command --skeleton` build through the
-  standard `LibraryCommand` pipeline with `TOOLCHAIN32=norcroftng`: AMU's
-  rule passes the source file as `c/main` (directory-based RISC OS form),
-  and `riscos-ncc` fails with `Error: type of 'c/main' unknown (file
-  ignored)`, reproducing exactly the failure already diagnosed above — the
-  Makefile-level wiring itself is correct and verified separately (a
-  minimal test Makefile confirms `CC`/`C++` resolve to
-  `riscos-ncc`/`riscos-n++`), but no real, unmodified project can build
-  end-to-end until this is fixed. Unlike the `gcc` branch (verified against
-  a real, unmodified project with no changes needed), `norcroftng` is not
-  yet usable for real project builds — it's a mechanically-correct
-  selector pointed at a compiler with this one known, pre-existing gap.
-  The proposed fix below (swap in real CLX's `fname`) would resolve this
-  the same way it resolves the general requirement; not otherwise
-  attempted here, since it's the same substantial, licensing-flagged piece
-  of work already recorded as a proposal, not something to do as a side
-  effect of wiring up a Makefile selector.
+None remaining — both the general filename-duality requirement and the
+concrete `TOOLCHAIN32=norcroftng` blocker it caused are now fixed and
+verified, per "Fixed" above.
 
 ## Proposals
 
-- Once the CLX `fname` swap is done, add tests exercising exactly the
-  cases the user listed (`c.main`, `main.c` with a `c/main` fallback,
-  `foo.h` with an `h/foo` fallback) as part of closing this area out —
-  see [testing-and-validation.md](testing-and-validation.md). These
-  weren't testable meaningfully before the swap, since the current
-  implementation is known not to handle them.
+None outstanding — the CLX-fname-swap proposal below is superseded by the
+fresh reimplementation above, per Charles's explicit choice (see "Fixed").
