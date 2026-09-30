@@ -1,0 +1,40 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux cross-compiler
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ncc-riscos and n++-riscos
+        run: |
+          make ncc TARGET=riscos
+          make n++ TARGET=riscos
+
+      - name: Archive
+        run: |
+          mkdir -p dist
+          tar czf dist/norcroft-ng-linux.tar.gz -C bin ncc-riscos n++-riscos
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: norcroft-ng-linux
+          path: dist/norcroft-ng-linux.tar.gz
+
+  # A second job building the native RISC OS compiler (bin/ncc,ff8,
+  # bin/n++,ff8 via HOST=riscos) and archiving it with rozipfile (from
+  # the rozipinfo pip package, which stores each file's RISC OS filetype
+  # in the zip's own extra field rather than literal ",ff8" leafnames)
+  # is intentionally not included here yet. It needs a container image
+  # providing the RISC OS build toolchain (riscos-cc, riscos-link, etc) -
+  # not yet decided where that image should come from for a public
+  # repository's CI specifically.
