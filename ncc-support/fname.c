@@ -18,7 +18,6 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 static int is_sep(int c) { return c=='/' || c=='\\'; }
 static int match_suffix(const char *ext, size_t elen, const char *list) {
