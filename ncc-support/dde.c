@@ -15,8 +15,7 @@
 
 #include "dde.h"
 #include "fname.h"
-
-#include <stdio.h>
+#include "throwback.h"
 
 const char* dde_desktop_prefix = 0;
 int dde_throwback_flag = 0;
@@ -30,34 +29,33 @@ int dde_throwback_flag = 0;
 #include <kernel.h>
 
 #define DDEUtils_Prefix 0x42580
-#define DDEUtils_ThrowbackStart 0x42587
-#define DDEUtils_ThrowbackSend 0x42588
 
-static int registered = 0;
-
+/* Sets the desktop's Throwback filename prefix to <directory of fname>
+ * <dde_desktop_prefix>, so a receiver rewrites the paths this tool
+ * reports through the prefix registered by '-desktop <prefix>'. Only
+ * meaningful - and only called by the real cc tool this is modelled on -
+ * when that option was actually given; a compile without '-desktop'
+ * leaves the desktop's prefix untouched, matching cc's own dde.c intent
+ * (not its code - see design/throwback.md).
+ */
 void dde_prefix_init(const char* fname)
 {
-    UnparsedName un;
-    char* path = 0;
-    _kernel_swi_regs regs;
+    if (dde_desktop_prefix) {
+        UnparsedName un;
+        char* prefix;
+        _kernel_swi_regs regs;
 
-    fprintf(stderr, "dde_prefix_init: %s ", fname);
+        fname_parse(fname, FNAME_SUFFIXES, &un);
 
-    fname_parse(fname, FNAME_SUFFIXES, &un);
+        prefix = malloc(un.plen + strlen(dde_desktop_prefix) + 1);
+        memcpy(prefix, un.path, un.plen);
+        strcpy(prefix + un.plen, dde_desktop_prefix);
 
-    if (un.plen > 0) {
-        path = malloc(un.plen + 1);
-        memcpy(path, un.path, un.plen);
-        path[un.plen-1] = '\0';
+        regs.r[0] = (int)prefix;
+        _kernel_swi(DDEUtils_Prefix, &regs, &regs);
+
+        free(prefix);
     }
-
-    fprintf(stderr, "path: %.*s ", un.plen, un.path);
-
-    regs.r[0] = (int)path;
-    _kernel_swi(DDEUtils_Prefix, &regs, &regs);
-
-    if (path)
-        free(path);
 }
 
 void dde_sourcefile_init(void)
@@ -66,22 +64,7 @@ void dde_sourcefile_init(void)
 
 void dde_throwback_send(unsigned int severity, unsigned int line, const char* msg)
 {
-    _kernel_swi_regs regs;
-
-    fprintf(stderr, "dde_throwback_send: line:%d:%s (%d)", line, msg, severity);
-
-    if (!registered) {
-        _kernel_swi(DDEUtils_ThrowbackStart, &regs, &regs);
-
-        registered = true;
-    }
-
-    regs.r[0] = 1;
-    regs.r[2] = (int)sourcefile;
-    regs.r[3] = line;
-    regs.r[4] = severity;
-    regs.r[5] = (int)msg;
-    _kernel_swi(DDEUtils_ThrowbackSend, &regs, &regs);
+    Throwback((seriousness_t)severity, (char*)sourcefile, (int)line, (char*)msg);
 }
 
 #endif

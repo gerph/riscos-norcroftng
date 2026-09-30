@@ -46,6 +46,7 @@ static void ErrorMessage(backchat_Diagnostic const *diag) {
     case BC_SEVERITY_WARN:    dde_throwback_send(THROWBACK_WARN, line, msg); break;
     case BC_SEVERITY_ERROR:   dde_throwback_send(THROWBACK_ERROR, line, msg); break;
     case BC_SEVERITY_SERIOUS: dde_throwback_send(THROWBACK_SERIOUS, line, msg); break;
+    case BC_SEVERITY_INFO:    dde_throwback_send(THROWBACK_INFO, line, msg); break;
     }
 #endif
 

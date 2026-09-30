@@ -316,6 +316,7 @@ SUPPORT_SRCS := \
   ncc-support/msg.c \
   ncc-support/prgname.c \
   ncc-support/riscos.c \
+  ncc-support/throwback.c \
   ncc-support/toolenv.c \
   ncc-support/trackfil.c \
   ncc-support/unmangle.c \

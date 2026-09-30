@@ -18,6 +18,7 @@
 #define THROWBACK_WARN      0
 #define THROWBACK_ERROR     1
 #define THROWBACK_SERIOUS   2
+#define THROWBACK_INFO      3
 
 // Untouched source passes in 'current', which is an unknown variable.
 void dde_prefix_init(const char* infile);
