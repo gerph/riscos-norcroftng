@@ -154,6 +154,37 @@ Full existing test suite re-run after these changes: 85 passed, 1 known
 pre-existing VFP failure (unchanged) - no regressions from the `dde.c`/
 `main.c`/Makefile changes.
 
+### Verified live, end-to-end - superseding the codegen-only bar above
+
+Once the link was unblocked (see "Fixed (stopgap)" below), the actual
+`bin/ncc,ff8` was built, copied into a scratch project, and run for real
+under Pyromaniac (`riscos-run "ncc -throwback c.t -c -o o.t"`) against a
+source file with a deliberate error and a deliberate warning. Real
+DDEUtils SWI traffic, received and rendered by Pyromaniac's own default
+`console` Throwback implementation:
+
+```
+Error: undeclared name, inventing 'extern int undeclared_thing'      (red, linked to c/t#3)
+Warning: variable 'unused_variable' declared but not used            (yellow, linked to c/t#4)
+Info: c.t: 1 warning, 1 error, 0 serious errors                      (blue, linked to c/t#0)
+```
+
+All three severities fired correctly with the right colours and
+clickable file/line links (Pyromaniac's console implementation opens
+`file://.../c/t#<line>`). The third line is the informational
+end-of-file summary - exactly the message that the missing
+`BC_SEVERITY_INFO` case would have silently dropped before this session's
+fix, now confirmed reaching Throwback for real, not just compiling
+correctly. `-desktop myprefix` was also exercised alongside `-throwback`
+and ran cleanly with no crash or behavioural change to the diagnostics
+above, confirming the rewritten `dde_prefix_init()` doesn't break
+anything when actually given a prefix.
+
+This fully supersedes the original "codegen-level is sufficient" bar
+agreed at the start of this work - a real linked binary, a real
+Pyromaniac desktop-console receiver, and all three severities were all
+exercised for real.
+
 **A genuinely unrelated, pre-existing bug was also found and fixed along
 the way**: `ncc-support/fname.c` (from an earlier, unrelated session task)
 had an unconditional, entirely unused `#include <unistd.h>` - the
@@ -167,47 +198,55 @@ cannot parse modern glibc's GNU-attribute-laden `<unistd.h>` at all
 front end understands). Removed the unused include; the bootstrap
 compile stage then completed cleanly.
 
-## Open: native `HOST=riscos` link is broken, unrelated to Throwback
+## Fixed (stopgap): native `HOST=riscos` link, via symlinks
 
-**Not fixed, not in scope here** - found while trying to get a full
-desktop/Pyromaniac runtime test of the linked `ncc,ff8` binary, not
-something introduced by this work:
+Found while trying to get a full desktop/Pyromaniac runtime test of the
+linked `ncc,ff8` binary - not something introduced by this work, and not
+really about Throwback at all, but it directly blocked verifying this
+feature for real, so it was fixed as part of the same session rather than
+left open:
 
 - `HOST=riscos`'s chosen linker, `drlink`, isn't an installed tool in
   this environment at all (`make: drlink: No such file or directory`).
   Overriding `LD=riscos-link` on the command line gets past that (Make's
-  command-line variable assignment overrides the Makefile's own `:=`),
-  and every `.c` file - including the new `throwback.c`/updated `dde.c` -
-  compiles cleanly through the full bootstrap (`bin/ncc-riscos` compiling
-  Norcroft NG's own sources targeting RISC OS natively).
-- The link itself then fails: `riscos-link` reports `File
+  command-line variable assignment overrides the Makefile's own `:=`).
+- The link itself then failed: `riscos-link` reported `File
   build/obj/.../aetree.o not found` for an object file that demonstrably
-  exists on disk (confirmed: real, valid AOF, correct size). Root-caused
-  by direct reproduction, not guessed: `riscos-link` uses the **real**
-  CLX `fname` module, which does exactly the extension-as-directory
-  inversion this session spent all day reimplementing a
-  Norcroft-NG-specific equivalent of (see
+  existed on disk (confirmed: real, valid AOF, correct size). Root-caused
+  by direct reproduction, not guessed: `riscos-link` (and `drlink`) use
+  the **real** CLX `fname` module, which does exactly the
+  extension-as-directory inversion this session spent all day
+  reimplementing a Norcroft-NG-specific equivalent of for the compiler
+  itself (see
   [riscos-build/filenames-and-paths.md](riscos-build/filenames-and-paths.md))
-  - unconditionally, with no literal-first fallback. Confirmed directly:
-  a bare `aetree.o` gets looked up as `o/aetree`, and placing a copy
-  there resolves it immediately (produces ordinary, expected undefined-
-  symbol errors for linking just one of many needed objects, not a
-  file-not-found error).
-- This means Norcroft NG's own Makefile object-file layout
-  (`build/obj/.../<name>.o`, flat, extension-suffixed) is fundamentally
-  incompatible with the real, installed `riscos-link` for the
-  `HOST=riscos` native build path - **a pre-existing gap, unrelated to
-  today's Throwback work**, and the reason the native self-hosted
-  compiler couldn't be linked and run under Pyromaniac for a full
-  end-to-end test this session. Verification for this feature therefore
-  stopped at the codegen level above, not a real linked-and-running
-  binary.
+  - unconditionally, with no literal-first fallback, for *any* recognised
+  suffix including `.o` and `.a`. Confirmed directly: a bare `aetree.o`
+  is looked up as `o/aetree`, and `stubs.a` as `a/stubs`; placing copies
+  there resolves both immediately.
+- Norcroft NG's own Makefile object/library layout (`build/obj/.../
+  <name>.o`, `lib/stubs.a` - flat, extension-suffixed) is the outlier
+  here, not the linker: "RISC OS code should largely use RISC OS format,
+  and this project is an outlier" (Charles). Rather than restructure the
+  whole build's layout now, `Makefile`'s link rules (`ensure_riscos_
+  symlinks`, used by all six `HOST=riscos` binary targets) symlink every
+  `.o`/`.a` prerequisite into a sibling `o/`/`a/` directory immediately
+  before linking - eg `build/obj/.../mip/aetree.o` gets `build/obj/.../
+  mip/o/aetree -> ../aetree.o` created alongside it. A no-op for the
+  ordinary cross-build (`LD=$(CC)`, an ordinary host linker with no such
+  quirk).
+- This is explicitly a stopgap, not the real fix - see "Proposals" below.
 
 ## Proposals
 
-- Fix the `HOST=riscos`/`riscos-link` object-layout incompatibility
-  (either give native-build object files an `o/`-prefixed directory
-  layout matching RISC OS convention, or find/install a working `drlink`)
-  so the native self-hosted compiler can actually be linked and given a
-  real desktop/Pyromaniac runtime test - not attempted here, flagged as a
-  separate, larger piece of work.
+- **Properly fix the `HOST=riscos` object/library layout**, rather than
+  relying on the symlink stopgap above indefinitely: restructure
+  `build/obj/.../<name>.o` into a genuine RISC-OS-style `build/obj/.../o/
+  <name>` layout (and `lib/stubs.a` into `lib/a/stubs`) so the real
+  linker's own lookup convention is satisfied directly, with no
+  generated symlinks needed at all. Matches Charles's own framing -
+  "this project is an outlier," not the linker - but is a larger,
+  Makefile-wide layout change, not attempted as part of this session's
+  Throwback work.
+- Separately, find or install a real `drlink` (rather than always relying
+  on the `LD=riscos-link` command-line override), if one is expected to
+  exist in this environment at all - not investigated.

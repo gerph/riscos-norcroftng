@@ -229,6 +229,37 @@ else
   LD := $(CC)
 endif
 
+# The real riscos-link (and drlink) use CLX's own fname module, which
+# unconditionally inverts a recognised dot-suffix into RISC OS's own
+# on-disk "extension-as-directory" form - a bare "aetree.o" is looked up
+# as "o/aetree", and "stubs.a" as "a/stubs", never the literal name, with
+# no fallback (see design/throwback.md's "Open" section). This project's
+# own object/library layout is the outlier here (RISC OS code should
+# generally already be in that form) - rather than restructure it now,
+# symlink each .o/.a into a sibling o//a/ directory beside it before
+# linking, so the real linker finds what it's actually looking for.
+# Cross-builds (LD=$(CC), an ordinary host linker) need none of this.
+ifeq ($(HOST),riscos)
+define ensure_riscos_symlinks
+	@for f in $^; do \
+		case "$$f" in \
+			*.o) ext=o ;; \
+			*.a) ext=a ;; \
+			*) ext= ;; \
+		esac; \
+		if [ -n "$$ext" ]; then \
+			d=$$(dirname "$$f"); \
+			b=$$(basename "$$f" ".$$ext"); \
+			mkdir -p "$$d/$$ext"; \
+			ln -sf "../$$(basename "$$f")" "$$d/$$ext/$$b"; \
+		fi; \
+	done
+endef
+else
+define ensure_riscos_symlinks
+endef
+endif
+
 # HOST_DIR contains host.h. Probably needs splitting into arm & riscos.
 HOST_DIR := $(SRC_ROOT)ncc-support
 SUPPORT_DIR := $(SRC_ROOT)ncc-support
@@ -531,21 +562,27 @@ $(HEADERS_OBJ): $(DERIVED_DIR)/headers.c $(BOOTSTRAP_NCC_RISCOS) | $(DERIVED_STA
 
 # ------------- link rules ---------------------
 $(BIN_NCC):     $(NCC_OBJS)     $(HEADERS_OBJ) | $(BIN_DIR)
+	$(ensure_riscos_symlinks)
 	$(LD) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BIN_NCPP):    $(NCPP_OBJS)    $(HEADERS_OBJ) | $(BIN_DIR)
+	$(ensure_riscos_symlinks)
 	$(LD) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BIN_NTCC):    $(NTCC_OBJS)    $(HEADERS_OBJ) | $(BIN_DIR)
+	$(ensure_riscos_symlinks)
 	$(LD) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BIN_NTCPP):   $(NTCPP_OBJS)   $(HEADERS_OBJ) | $(BIN_DIR)
+	$(ensure_riscos_symlinks)
 	$(LD) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BIN_INTERP):  $(INTERP_OBJS)  $(HEADERS_OBJ) | $(BIN_DIR)
+	$(ensure_riscos_symlinks)
 	$(LD) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BIN_CLBCOMP): $(CLBCOMP_OBJS) $(HEADERS_OBJ) | $(BIN_DIR)
+	$(ensure_riscos_symlinks)
 	$(LD) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 # derived generation -------------
