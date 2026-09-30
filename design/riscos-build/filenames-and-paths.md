@@ -77,25 +77,27 @@ maintaining a second, admittedly-incomplete implementation alongside it.
 
 ### A licensing fact worth recording plainly
 
-CLX's `fname.h`/`pathmacro.h` (and, presumably, its other modules) carry
-explicit copyright notices — "Advanced RISC Machines Ltd., 1992" and
-"Pace Micro Technology plc., 2000" — with **no LICENSE file found**
-anywhere in the CLX source tree, and no license header in the files
-themselves beyond the bare copyright line. Under this project's licensing
-rules (no GPL; otherwise MIT/Apache-2.0 as used elsewhere in this repo),
-an unlicensed proprietary-copyright dependency would normally be a real
-stop-and-check moment. Recording the mitigating context rather than
-treating it as a fresh risk this project is introducing: CLX is already
-pervasive, load-bearing infrastructure across this entire build
-environment — it's exported by `native-build-tools`/`native-build-headers`
-and consumed by dozens of existing projects under `/riscos-source`
-(`riscos-gos`, `riscos-gcontext`, `pyromaniac`, `justin/p2cc`, and others),
-and it's exactly what the reference `cc` tool this design was told to
-mirror already depends on for this very feature. This isn't a new
-acceptance decision Norcroft NG is making alone; it's adopting an
-already-standing one. Flagging it here anyway, in case that standing
-decision is itself something you'd want revisited — that's a call above
-this design's scope, not something to silently assume is fine.
+**Corrected by Charles directly**: the copyright question above was
+overstated. CLX's `fname.h`/`pathmacro.h` (and, presumably, its other
+modules) carry explicit copyright notices — "Advanced RISC Machines Ltd.,
+1992" and "Pace Micro Technology plc., 2000" — with no LICENSE file in
+the CLX source tree and no license header in the files themselves beyond
+the bare copyright line, which reads as a stop-and-check moment on its
+own. But Pace granted this project's author usage rights to CLX years
+ago, directly, outside of what any file in the tree records — the actual
+legal position is settled, just not machine-discoverable from the
+repository alone. CLX is also already pervasive, load-bearing
+infrastructure across this whole build environment regardless (exported
+by `native-build-tools`/`native-build-headers`, consumed by dozens of
+existing projects under `/riscos-source`), and it's what the reference
+`cc` tool already depends on for this very feature - so this was never a
+fresh risk Norcroft NG was introducing.
+
+This *doesn't* retroactively change the choice already made above (fresh
+reimplementation over vendoring CLX's actual source into Norcroft NG) -
+that choice stands for its own reasons (see "Proposals" below for where
+this is actually heading next), not because of a licensing blocker that
+turned out not to exist.
 
 ### Colon-path/variable expansion for `#include` search: confirmed working
 ### against the real `riscos-cc` — my first report of this failing was wrong
@@ -261,5 +263,25 @@ verified, per "Fixed" above.
 
 ## Proposals
 
-None outstanding — the CLX-fname-swap proposal below is superseded by the
-fresh reimplementation above, per Charles's explicit choice (see "Fixed").
+- **A general-purpose, freely-derived, tested `fname` replacement**
+  (Charles, 2026-09-30): now that the CLX-licensing question is settled
+  (see above) and no longer a blocker either way, the more interesting
+  direction isn't just "Norcroft NG has its own small reimplementation" -
+  it's writing a *properly general* version (not tied to Norcroft NG's
+  own narrower needs) that could eventually **replace CLX's own `fname`
+  module** across this build environment generally: same behaviour,
+  freshly written, with bugs fixed and - Charles's own emphasis - **with
+  a real test suite**, which the existing CLX `fname` has none of today.
+  Not started: this is bigger than de-duplicating the small
+  `ext`+`root`-building helper currently inlined in both `driver.c` and
+  `compiler.c` (deferred on its own, immediately below) - it means a
+  fresh design pass of its own, covering the full CLX `fname` behaviour
+  (not just the RISC-OS-duality/colon-path/`<Var>` subset Norcroft NG
+  needed), before any of the rest of this environment could actually
+  adopt it in place of CLX's version.
+- **De-duplicate the small `ext`/`root` candidate-building logic** between
+  `driver.c` and `compiler.c` into one shared `fname.c` helper - deferred
+  by Charles explicitly ("don't worry about factoring it out; we'll do
+  that later if we fix things properly and create a whole new set of
+  routines"), in favour of doing it once, properly, as part of the
+  general replacement above rather than twice.
