@@ -37,6 +37,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The build runs some host-side generator tools, so needs a host C compiler.
+      - name: Ensure a host C compiler is available
+        run: |
+          command -v cc || (apt-get update && apt-get install -y build-essential)
+
       # Stage 1 is the cross-compiler; stage 2 uses it to build Norcroft NG
       # itself as native RISC OS executables (bin/ncc,ff8 and bin/n++,ff8).
       - name: Build stage 1 (cross-compilers)
