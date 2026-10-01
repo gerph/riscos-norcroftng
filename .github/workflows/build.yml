@@ -111,5 +111,4 @@ jobs:
         with:
           draft: true
           prerelease: false
-          generateReleaseNotes: true
           artifacts: "dist/norcroft-ng-linux.tar.gz,dist/norcroft-ng-riscos.zip"
