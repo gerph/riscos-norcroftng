@@ -13,7 +13,7 @@ jobs:
     name: Linux cross-compiler
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build ncc-riscos and n++-riscos
         run: |
@@ -25,7 +25,7 @@ jobs:
           mkdir -p dist
           tar czf dist/norcroft-ng-linux.tar.gz -C bin ncc-riscos n++-riscos
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: norcroft-ng-linux
           path: dist/norcroft-ng-linux.tar.gz
@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     container: gerph/riscos-build:latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The build runs some host-side generator tools, so needs a host C compiler.
       - name: Ensure a host C compiler is available
@@ -81,7 +81,7 @@ jobs:
           cd bin
           "$RUNNER_TEMP/venv/bin/python" -m rozipfile --create ../dist/norcroft-ng-riscos.zip "ncc,ff8" "n++,ff8"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: norcroft-ng-riscos
           path: dist/norcroft-ng-riscos.zip
