@@ -2,6 +2,8 @@ name: Build
 
 on:
   push:
+    branches: ["*"]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -85,3 +87,29 @@ jobs:
         with:
           name: norcroft-ng-riscos
           path: dist/norcroft-ng-riscos.zip
+
+  # Pushing a tag such as v1.0.0 creates a draft GitHub release carrying both
+  # archives. It is left as a draft so that it can be checked and its notes
+  # written before it is published.
+  release:
+    name: Draft release
+    needs: [linux, riscos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download the built archives
+        uses: actions/download-artifact@v8
+        with:
+          pattern: norcroft-ng-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        uses: ncipollo/release-action@v1
+        with:
+          draft: true
+          prerelease: false
+          generateReleaseNotes: true
+          artifacts: "dist/norcroft-ng-linux.tar.gz,dist/norcroft-ng-riscos.zip"
