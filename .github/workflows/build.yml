@@ -30,11 +30,52 @@ jobs:
           name: norcroft-ng-linux
           path: dist/norcroft-ng-linux.tar.gz
 
-  # A second job building the native RISC OS compiler (bin/ncc,ff8,
-  # bin/n++,ff8 via HOST=riscos) and archiving it with rozipfile (from
-  # the rozipinfo pip package, which stores each file's RISC OS filetype
-  # in the zip's own extra field rather than literal ",ff8" leafnames)
-  # is intentionally not included here yet. It needs a container image
-  # providing the RISC OS build toolchain (riscos-cc, riscos-link, etc) -
-  # not yet decided where that image should come from for a public
-  # repository's CI specifically.
+  riscos:
+    name: Native RISC OS compiler
+    runs-on: ubuntu-latest
+    container: gerph/riscos-build:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Stage 1 is the cross-compiler; stage 2 uses it to build Norcroft NG
+      # itself as native RISC OS executables (bin/ncc,ff8 and bin/n++,ff8).
+      - name: Build stage 1 (cross-compilers)
+        run: |
+          make ncc TARGET=riscos
+          make n++ TARGET=riscos
+
+      - name: Build stage 2 (native RISC OS compilers)
+        run: |
+          make ncc TARGET=riscos HOST=riscos LD=riscos-link
+          make n++ TARGET=riscos HOST=riscos LD=riscos-link
+
+      # Run each native compiler on the RISC OS Build Service, compiling a
+      # trivial source to assembler on stdout. The sources use RISC OS
+      # directory-as-extension layout (c/t, cpp/t) as a real RISC OS tool
+      # would see them.
+      - name: Test native compilers with riscos-build-run
+        shell: bash
+        run: |
+          set -eo pipefail
+          mkdir -p smoketest/c smoketest/cpp
+          printf 'int main(void) { return 0; }\n' > smoketest/c/t
+          printf 'class Foo { public: int bar() { return 1; } };\nint main(void) { Foo f; return f.bar(); }\n' > smoketest/cpp/t
+          riscos-build-run "bin/ncc,ff8" smoketest/ --command "ncc c.t -S -o -" --timeout 120 | tee ncc.out
+          grep -q "EXPORT main" ncc.out
+          riscos-build-run "bin/n++,ff8" smoketest/ --command "n++ cpp.t -S -o -" --timeout 120 | tee npp.out
+          grep -q "EXPORT main" npp.out
+
+      # rozipfile (from the rozipinfo package) records each file's RISC OS
+      # filetype in the zip itself, rather than as a literal ",ff8" leafname.
+      - name: Archive
+        run: |
+          command -v pip3 || (apt-get update && apt-get install -y python3-pip)
+          pip3 install rozipinfo
+          mkdir -p dist
+          cd bin
+          python3 -m rozipfile --create ../dist/norcroft-ng-riscos.zip "ncc,ff8" "n++,ff8"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: norcroft-ng-riscos
+          path: dist/norcroft-ng-riscos.zip
